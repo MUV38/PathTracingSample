@@ -1,7 +1,12 @@
 #include "Renderer.h"
 
+#include <imgui.h>
+#include <backends/imgui_impl_win32.h>
+
 #include <exception>
 #include <stdexcept>
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
 // These exports opt the executable into the app-local Agility SDK runtime.
 extern "C"
@@ -21,6 +26,10 @@ struct WindowState
 
 LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	if (ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam))
+	{
+		return 1;
+	}
 	auto* state = reinterpret_cast<WindowState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
 	if (message == WM_NCCREATE)
 	{
@@ -40,7 +49,7 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 	case WM_ERASEBKGND:
 		return 1;
 	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE)
+		if (wParam == VK_ESCAPE && (!ImGui::GetCurrentContext() || !ImGui::GetIO().WantCaptureKeyboard))
 		{
 			DestroyWindow(window);
 			return 0;
@@ -57,6 +66,7 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
 	HWND window = nullptr;
+	WindowState state;
 	try
 	{
 		SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -73,7 +83,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 			throw std::runtime_error("RegisterClassExW failed.");
 		}
 
-		WindowState state;
 		RECT rectangle{0, 0, static_cast<LONG>(state.mWidth), static_cast<LONG>(state.mHeight)};
 		if (!AdjustWindowRectEx(&rectangle, WS_OVERLAPPEDWINDOW, FALSE, 0))
 		{
