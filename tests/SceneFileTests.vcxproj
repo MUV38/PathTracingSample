@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals">
+		<ProjectGuid>{410F9919-95AA-41A3-AEBF-818B8936C841}</ProjectGuid>
+		<Microsoft_Direct3D_D3D12_SkipLibraryCopy>true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
+		<Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
+	</PropertyGroup>
+	<Import Project="..\build_support\Cpp.props" />
+	<ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+	<ItemGroup>
+		<ClCompile Include="SceneFileTests.cpp" />
+		<ClCompile Include="..\common\SceneFile.cpp" />
+		<ClInclude Include="..\common\SceneFile.h" />
+	</ItemGroup>
+	<Import Project="..\build_support\Cpp.targets" />
+</Project>

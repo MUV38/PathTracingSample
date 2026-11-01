@@ -1,0 +1,6 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup>
+		<OpenUsdRoot>C:\SDK\OpenUSD-release</OpenUsdRoot>
+		<OpenUsdDebugRoot>C:\SDK\OpenUSD-debug</OpenUsdDebugRoot>
+	</PropertyGroup>
+</Project>

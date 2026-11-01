@@ -24,6 +24,13 @@ if文で1行で終わる実行コードも{}で囲い、それぞれ改行する
 カメラの計算は `common/Camera` を再利用し、Win32 / ImGuiの入力振り分けはサンプル側で行うこと
 カメラの計算を変更した場合は、Debug / Releaseの `CameraTests.exe` を実行すること
 
+# USDデータ
+OpenUSD SDKは `tools/UsdConverter/UsdConverter.slnx` の独立した変換プロジェクトにのみリンクすること
+表示サンプルは `common/SceneFile` の変換済み `.ptscene` を読み、USD SDKやPythonに依存させないこと
+入手したKitchen Setの原本と変換データは `assets/local/` または `build/` に置き、コミットしないこと。同梱のPreview Roomは自作モデルでありKitchen Setと混同しないこと
+独自形式を変更した場合はバージョン互換性を明示し、Debug / ReleaseのSceneFileTestsを実行すること
+変換ツールを変更した場合は自作USDフィクスチャを変換してSceneFileTestsの追加引数で検証すること。手順はtools/UsdConverter/README.mdを参照すること
+
 # C++仕様
 C++20を採用
 命名規則は指定のないものは一般的なC++規則に従う

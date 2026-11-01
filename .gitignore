@@ -2,3 +2,5 @@
 /.vs/
 /packages/
 *.vcxproj.user
+/build_support/Usd.local.props
+/assets/local/
