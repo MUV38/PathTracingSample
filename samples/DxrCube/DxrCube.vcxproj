@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{1CADCE68-C963-4F5F-A5F8-6ECB2A9B9439}</ProjectGuid>
+  </PropertyGroup>
+  <Import Project="..\..\build_support\Cpp.props" />
+  <PropertyGroup>
+    <DxcExecutable>$([System.String]::Copy('$(WindowsSDK_ExecutablePath_x64)').Split(';')[0])\dxc.exe</DxcExecutable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="DxrCube.cpp" />
+    <ClInclude Include="DxrCube.h" />
+    <ProjectReference Include="..\..\common\SampleFramework.vcxproj">
+      <Project>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</Project>
+    </ProjectReference>
+    <CustomBuild Include="Cube.hlsl">
+      <Command>"$(DxcExecutable)" -T lib_6_3 -HV 2021 -WX -Fo "$(OutDir)Cube.dxil" "%(FullPath)"</Command>
+      <Outputs>$(OutDir)Cube.dxil</Outputs>
+      <Message>Compiling DXR shader library: Cube.hlsl</Message>
+    </CustomBuild>
+  </ItemGroup>
+  <Import Project="..\..\build_support\Cpp.targets" />
+  <Target Name="CheckDxc" BeforeTargets="CustomBuild">
+    <Error Condition="!Exists('$(DxcExecutable)')" Text="DXC was not found in the selected Windows SDK. Install a current Windows SDK with DirectX shader tools." />
+  </Target>
+</Project>

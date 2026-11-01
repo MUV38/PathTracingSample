@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B2A41A65-0885-4A57-B9E6-F14CC56F2C94}</ProjectGuid>
+    <Microsoft_Direct3D_D3D12_SkipLibraryCopy>true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
+    <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
+  </PropertyGroup>
+  <Import Project="..\build_support\Cpp.props" />
+  <ItemDefinitionGroup>
+    <Link><SubSystem>Console</SubSystem></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="CameraTests.cpp" />
+    <ClCompile Include="..\common\Camera.cpp" />
+    <ClInclude Include="..\common\Camera.h" />
+  </ItemGroup>
+  <Import Project="..\build_support\Cpp.targets" />
+</Project>

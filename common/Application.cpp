@@ -1,14 +1,17 @@
 #include "Renderer.h"
+#include "Sample.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <shellapi.h>
+#include <windowsx.h>
 
 #include <exception>
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -27,10 +30,22 @@ struct WindowState
 	UINT mHeight = 720;
 	bool mMinimized = false;
 	bool mScreenshotRequested = false;
+	bool mRawMouseRegistered = false;
+	MouseMotion mMouseMotion;
 };
 
 LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	if ((message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL) && ImGui::GetCurrentContext())
+	{
+		// Wheel messages carry their own cursor position; enqueue it before the wheel event
+		// so moving from the viewport onto UI and immediately scrolling cannot use stale hover state.
+		POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+		if (ScreenToClient(window, &point))
+		{
+			ImGui::GetIO().AddMousePosEvent(static_cast<float>(point.x), static_cast<float>(point.y));
+		}
+	}
 	if (ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam))
 	{
 		return 1;
@@ -43,6 +58,33 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 	}
 	switch (message)
 	{
+	case WM_INPUT:
+		if (state)
+		{
+			RAWINPUT input{};
+			UINT size = sizeof(input);
+			if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &input, &size, sizeof(RAWINPUTHEADER)) != UINT(-1)
+				&& input.header.dwType == RIM_TYPEMOUSE)
+			{
+				if ((input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0)
+				{
+					state->mMouseMotion.mDeltaX += static_cast<float>(input.data.mouse.lLastX);
+					state->mMouseMotion.mDeltaY += static_cast<float>(input.data.mouse.lLastY);
+				}
+				else
+				{
+					state->mMouseMotion.mUseRawMouse = false;
+				}
+			}
+		}
+		// DefWindowProc releases the foreground raw-input packet.
+		break;
+	case WM_KILLFOCUS:
+		if (state)
+		{
+			state->mMouseMotion = {};
+		}
+		break;
 	case WM_SIZE:
 		if (state)
 		{
@@ -53,6 +95,12 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 		return 0;
 	case WM_ERASEBKGND:
 		return 1;
+	case WM_SYSCOMMAND:
+		if ((wParam & 0xfff0) == SC_KEYMENU && lParam == 0)
+		{
+			return 0; // Bare Alt belongs to viewport camera gestures; keep Alt+Space available.
+		}
+		break;
 	case WM_KEYDOWN:
 		if (wParam == VK_F12)
 		{
@@ -76,7 +124,18 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 }
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
+std::filesystem::path executableDirectory()
+{
+	std::array<wchar_t, 32768> path{};
+	const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+	if (length == 0 || length >= path.size())
+	{
+		throw std::runtime_error("Cannot locate the executable directory.");
+	}
+	return std::filesystem::path(path.data()).parent_path();
+}
+
+int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 {
 	HWND window = nullptr;
 	WindowState state;
@@ -96,7 +155,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 		{
 			if (argumentCount != 3 || std::wstring_view(arguments.get()[1]) != L"--screenshot" || arguments.get()[2][0] == L'\0')
 			{
-				throw std::runtime_error("Usage: PathTracingSample.exe [--screenshot <output.png>]");
+				throw std::runtime_error("Usage: <sample.exe> [--screenshot <output.png>]");
 			}
 			screenshotPath = arguments.get()[2];
 		}
@@ -119,17 +178,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 		{
 			throw std::runtime_error("AdjustWindowRectEx failed.");
 		}
-		window = CreateWindowExW(0, ClassName, L"PathTracingSample", WS_OVERLAPPEDWINDOW,
+		window = CreateWindowExW(0, ClassName, sample.mName, WS_OVERLAPPEDWINDOW,
 			CW_USEDEFAULT, CW_USEDEFAULT, rectangle.right - rectangle.left,
 			rectangle.bottom - rectangle.top, nullptr, nullptr, instance, &state);
 		if (!window)
 		{
 			throw std::runtime_error("CreateWindowExW failed.");
 		}
+		RAWINPUTDEVICE mouse{0x01, 0x02, 0, window};
+		state.mRawMouseRegistered = RegisterRawInputDevices(&mouse, 1, sizeof(mouse)) != FALSE;
+		state.mMouseMotion.mUseRawMouse = state.mRawMouseRegistered;
 
 		Renderer renderer;
-		renderer.initialize(window, state.mWidth, state.mHeight);
-		const std::wstring title = L"PathTracingSample | DirectX 12 | " + renderer.adapterName() +
+		renderer.initialize(window, state.mWidth, state.mHeight, sample);
+		const std::wstring title = std::wstring(sample.mName) + L" | DirectX 12 | " + renderer.adapterName() +
 			(renderer.supportsRaytracing() ? L" | DXR supported" : L" | DXR unavailable");
 		SetWindowTextW(window, title.c_str());
 		ShowWindow(window, showCommand);
@@ -145,11 +207,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 			}
 			else if (state.mMinimized)
 			{
+				state.mMouseMotion = {0.0f, 0.0f, state.mRawMouseRegistered};
 				WaitMessage();
 			}
 			else
 			{
 				renderer.resize(state.mWidth, state.mHeight);
+				renderer.setMouseMotion(std::exchange(state.mMouseMotion, MouseMotion{0.0f, 0.0f, state.mRawMouseRegistered}));
 				const bool captureAndExit = screenshotMode && renderedFrames >= 2;
 				if (captureAndExit || state.mScreenshotRequested)
 				{

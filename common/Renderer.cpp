@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "Screenshot.h"
+#include "Sample.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx12.h>
@@ -7,6 +8,7 @@
 #include <shellapi.h>
 
 #include <cassert>
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <utility>
@@ -15,13 +17,7 @@ namespace
 {
 std::filesystem::path screenshotDirectory()
 {
-	std::array<wchar_t, 32768> executablePath{};
-	const DWORD length = GetModuleFileNameW(nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
-	if (length == 0 || length >= executablePath.size())
-	{
-		throw std::runtime_error("Cannot locate the screenshot output directory.");
-	}
-	return std::filesystem::path(executablePath.data()).parent_path() / L"screenshots";
+	return executableDirectory() / L"screenshots";
 }
 
 void check(HRESULT result, const char* operation)
@@ -58,8 +54,9 @@ Renderer::~Renderer()
 	}
 }
 
-void Renderer::initialize(HWND window, UINT width, UINT height)
+void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sample)
 {
+	mSample = &sample;
 	UINT factoryFlags = 0;
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> debug;
@@ -91,6 +88,13 @@ void Renderer::initialize(HWND window, UINT width, UINT height)
 		if (!(description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
 			SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice))))
 		{
+			D3D12_FEATURE_DATA_D3D12_OPTIONS5 adapterOptions{};
+			if (sample.mRequireDxr && (FAILED(mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
+				&adapterOptions, sizeof(adapterOptions))) || adapterOptions.RaytracingTier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED))
+			{
+				mDevice.Reset();
+				continue;
+			}
 			mAdapterName = description.Description;
 			break;
 		}
@@ -98,6 +102,10 @@ void Renderer::initialize(HWND window, UINT width, UINT height)
 	}
 	if (!mDevice)
 	{
+		if (sample.mRequireDxr)
+		{
+			throw std::runtime_error("This sample requires a DXR-capable GPU and driver (Raytracing Tier 1.0 or later).");
+		}
 		check(mFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)), "EnumWarpAdapter");
 		check(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice)), "D3D12CreateDevice (WARP)");
 		mAdapterName = L"WARP (software)";
@@ -145,6 +153,10 @@ void Renderer::initialize(HWND window, UINT width, UINT height)
 	mWidth = width;
 	mHeight = height;
 	initializeGui(window);
+	if (sample.mInitialize)
+	{
+		sample.mInitialize(*this);
+	}
 }
 
 void Renderer::initializeGui(HWND window)
@@ -228,10 +240,16 @@ void Renderer::drawGui()
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
+	if (mSample->mUpdate)
+	{
+		mSample->mUpdate(*this, ImGui::GetIO().DeltaTime);
+	}
 
 	ImGui::SetNextWindowPos(ImVec2(24.0f, 24.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
-	if (ImGui::Begin("PathTracingSample", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f, 0.0f),
+		ImVec2((std::max)(300.0f, ImGui::GetIO().DisplaySize.x - 48.0f), (std::max)(200.0f, ImGui::GetIO().DisplaySize.y - 48.0f)));
+	if (ImGui::Begin("Sample controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		ImGui::Text("DirectX 12 / Dear ImGui %s", IMGUI_VERSION);
 		ImGui::Text("DXR: %s", mRaytracingSupported ? "supported" : "unavailable");
@@ -239,6 +257,11 @@ void Renderer::drawGui()
 		const float frameRate = ImGui::GetIO().Framerate;
 		ImGui::Text("%.1f FPS (%.3f ms/frame)", frameRate, frameRate > 0.0f ? 1000.0f / frameRate : 0.0f);
 		ImGui::Separator();
+		if (mSample->mDrawGui)
+		{
+			mSample->mDrawGui();
+			ImGui::Separator();
+		}
 		ImGui::ColorEdit3("Clear color", mClearColor.data());
 		if (ImGui::Button("Reset clear color"))
 		{
@@ -329,6 +352,10 @@ void Renderer::render()
 	auto rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
 	rtv.ptr += static_cast<SIZE_T>(index) * mRtvStride;
 	mCommandList->ClearRenderTargetView(rtv, mClearColor.data(), 0, nullptr);
+	if (mSample->mRender)
+	{
+		mSample->mRender(*this, mCommandList.Get(), mRenderTargets[index].Get());
+	}
 	mCommandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 	ID3D12DescriptorHeap* heaps[] = {mGuiSrvHeap.Get()};
 	mCommandList->SetDescriptorHeaps(1, heaps);
@@ -352,9 +379,10 @@ void Renderer::render()
 	check(mCommandList->Close(), "Close command list");
 	ID3D12CommandList* lists[] = {mCommandList.Get()};
 	mQueue->ExecuteCommandLists(1, lists);
-	check(mSwapChain->Present(1, 0), "Present");
+	const HRESULT presentResult = mSwapChain->Present(1, 0);
 	// One frame in flight keeps allocator/resource lifetime explicit at this first milestone.
 	waitForGpu();
+	check(presentResult, "Present");
 	if (screenshotRecorded)
 	{
 		try

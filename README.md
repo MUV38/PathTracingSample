@@ -1,96 +1,140 @@
 # PathTracingSample
 
-DXRによるPath Tracing実装に向けた、Win32 / DirectX 12の最初のステップです。
-現段階では1280 × 720のウィンドウを開き、画面クリアとDear ImGuiによる操作パネルを表示します。
+Visual Studio 2026で開く、Win32 / DirectX 12 / DXRのサンプル集です。
+Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 
-## 必要な環境
+## サンプル
 
-- Windows 11、またはAgility SDKに対応した更新済みWindows 10
-- Visual Studio 2026の「C++によるデスクトップ開発」、MSVC v145、Windows SDK
-- 初回のNuGetパッケージ復元時に接続できるネットワーク環境
+| プロジェクト | 内容 | 必要なGPU機能 |
+| --- | --- | --- |
+| PathTracingSample | 画面クリア、ImGui、スクリーンショット | DirectX 12。ハードウェアが利用できなければWARP |
+| DxrCube | 12枚の三角形のキューブをDXRで描画 | DXR Tier 1.0以上に対応するGPUとドライバ |
+| SampleFramework | 上記で共有する静的ライブラリ | 単独では起動しません |
+| CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 
-Agility SDKは **Microsoft.Direct3D.D3D12 1.722.0-preview** に固定しています。
-CLAS (Clustered Geometry / Cluster-level Acceleration Structures)を今後利用するための選択で、
-今回のコードにはまだアクセラレーション構造やレイトレーシング処理を含めていません。
-DXR / CLASの実装には、それぞれの機能に対応したGPUとドライバが必要です。
-タイトルバーの `DXR supported` は基本的なDXR対応を示し、CLAS対応の判定ではありません。
+DXRキューブは1個のBLASとTLAS、レイトレーシングPSO、シェーダーテーブルを構築し、
+DispatchRays()からRay Generation / Miss / Closest Hitシェーダーを実行します。
+Closest Hitで面の法線に応じた拡散照明を計算します。カメラの方位角・仰角・距離と色をImGuiから変更できます。
+リサイズ時はDXR出力テクスチャを再作成し、DXR描画後にImGuiを重ねます。
+単発の一次レイによるDXR入門サンプルです。Path Tracingの多重反射・蓄積、影、CLASはまだ実装していません。
 
 ## ビルドと実行
 
-1. リポジトリ直下の `PathTracingSample.slnx` をVisual Studio 2026で開きます。
-2. 初回はソリューションを右クリックし、「NuGetパッケージの復元」を実行します。
-3. `Debug | x64` または `Release | x64` を選択してビルドします。
-4. F5でデバッグ実行、またはCtrl+F5でデバッグなしで実行します。
+必要な環境:
 
-実行ファイルは `build/x64/Debug/PathTracingSample.exe` または
-`build/x64/Release/PathTracingSample.exe` に出力されます。
-Developer PowerShell for VS 2026からは次のコマンドでも復元・ビルドできます。
+- Agility SDK対応のWindows 11、または更新済みWindows 10
+- Visual Studio 2026の「C++によるデスクトップ開発」とMSVC v145
+- DXCを含む新しいWindows SDK（10.0.26100.0でビルド確認）
+- 初回のNuGetパッケージ復元時に接続できるネットワーク環境
+
+1. ルートの `PathTracingSample.slnx` をVisual Studio 2026で開きます。
+2. 初回はソリューションを右クリックして「NuGetパッケージの復元」を実行します。
+3. `Debug | x64` または `Release | x64` を選んでビルドします。
+4. 起動したいサンプルを右クリックし、スタートアッププロジェクトに設定します（既定はDxrCube）。
+5. F5でデバッグ実行、Ctrl+F5でデバッグなしで実行します。
+
+Developer PowerShell for VS 2026からは次のコマンドも使用できます。
 
 ```powershell
 msbuild PathTracingSample.slnx /restore /p:RestorePackagesConfig=true /p:Configuration=Debug /p:Platform=x64
-.\build\x64\Debug\PathTracingSample.exe
+.\build\x64\Debug\DxrCube\DxrCube.exe
+.\build\x64\Debug\PathTracingSample\PathTracingSample.exe
 ```
 
-`packages.config` で指定した公式NuGetパッケージを `packages/` に復元します。
-パッケージ付属のMSBuild props / targetsがインクルードパスを設定し、
-実行ファイルの隣の `D3D12/` にランタイムDLLと対応するPDBをコピーします。
-実行ファイルから `D3D12SDKVersion = 722` と `D3D12SDKPath = ".\\D3D12\\"` をエクスポートし、
-アプリケーションローカルのランタイムを選択します。配布時もこのフォルダ構成を維持してください。
+出力先は `build/x64/<構成>/<プロジェクト名>/` です。中間ファイルもプロジェクト別に分離しています。
+Cube.hlslはWindows SDKのDXCでlib_6_3としてビルドし、実行ファイル隣のCube.dxilに出力します。
+実行時のカレントディレクトリに依存せず、実行ファイルの位置からシェーダーを読み込みます。
+配布時はCube.dxilと下記のD3D12フォルダも含めてください。
 
-## 動作
+packages.configの公式Agility SDKをルートのpackagesフォルダに復元します。
+共通MSBuild props / targetsがインクルードパスを設定し、各実行ファイル隣のD3D12フォルダにランタイムDLLとPDBを配置します。
+各実行ファイルはD3D12SDKVersion = 722と、相対パスD3D12を示すD3D12SDKPathをエクスポートします。
+Agility SDKは将来のCLAS利用を見据えた指定版を維持しています。DXR対応の表示はCLAS対応を意味しません。
 
-- ハードウェアGPUを優先してDirectX 12デバイスを作成します。利用できない場合はWARPへフォールバックします。
-- 2枚のバックバッファ、RTV、コマンドキュー / アロケータ / リスト、フェンスを作成します。
-- `PRESENT → RENDER_TARGET → PRESENT` のリソース遷移とクリア処理を記録し、VSync付きで表示します。
-- 初期段階の実装を簡潔にするため、毎フレームGPUの完了を待ちます。
-- リサイズ時はGPU完了後にバックバッファとRTVを再作成します。最小化中は描画を休止します。
-- Escまたはウィンドウの閉じるボタンで終了します。
+## 構成とサンプル追加
+
+- `common/`: ウィンドウ、DirectX 12初期化、ImGui、GPU同期、撮影を共有するSampleFramework
+- `samples/Clear/`: 既存の画面クリアサンプルのエントリーポイント
+- `samples/DxrCube/`: DXRキューブのC++とHLSL、独立した実行プロジェクト
+- `build_support/`: 全プロジェクトの共通Visual Studio設定とAgility SDK設定
+- `third_party/imgui/`: ライセンス付きの公式ソース。元の書式を維持
+
+サンプルはcommon/Sample.hの初期化・更新・UI・描画コールバックを必要な分だけ設定します。
+大きな継承階層や共通Renderer内のサンプル別分岐は使いません。
+新しいサンプルを増やす手順と最小プロジェクトの例は [samples/README.md](samples/README.md) にあります。
+
+## 共通の操作と動作
+
+- 2枚のバックバッファ、VSync付きPresent、フェンスによる同期を使用します。
+- 実装を簡潔にするため、毎フレームGPUの完了を待ちます。
+- リサイズに対応し、最小化中は描画を休止します。
+- 共通パネルでFPS、フレーム時間、バックバッファサイズ、DXR対応状況を表示します。
+- Clear colorで背景色、Reset clear colorで初期色に戻せます。
+- Show ImGui demoで公式デモを表示できます。
+- Escまたは閉じるボタンで終了します。ImGuiがキーボードを使用している間はEsc終了を抑制します。
 - Debugでは利用可能ならD3D12デバッグレイヤーを有効にします。
-- 初期化や描画の失敗時には、処理名とHRESULTをダイアログに表示します。
-- ImGuiパネルにFPS、フレーム時間、バックバッファのサイズ、DXR対応状況を表示します。
-- `Clear color` で背景色を変更し、`Reset clear color` で初期色へ戻せます。
-- `Show ImGui demo` で公式デモウィンドウの表示を切り替えられます。
-- ImGuiがキーボード入力を使用している間は、Escによるアプリ終了を抑制します。
-- `Save screenshot (F12)` ボタンまたはF12キーで、ImGuiを含む描画結果をPNGへ保存します。
+- DXRサンプルは対応GPUを優先して選び、存在しない場合は明示的にエラー終了します。
+- Dear ImGuiは共通ライブラリで一度だけコンパイルします。専用SRVヒープと割り当て／解放コールバックを使用します。
 
-`src/Main.cpp` がウィンドウとメッセージループ、`src/Renderer.cpp` がDirectX 12の初期化と描画を担当します。
-クリア色はUI、または `Renderer` の `mClearColor` で変更できます。
+## DXRサンプルのカメラ操作
 
-## Dear ImGui
+マウス操作は右側の描画領域から開始します。ImGui上のクリックやホイールはUI操作として扱います。
 
-**Dear ImGui v1.93.0** の公式ソースとMITライセンスを `third_party/imgui/` に同梱しています。
-Win32 / DirectX 12バックエンドを使用し、Visual Studioプロジェクトから直接コンパイルします。
-ImGui用の追加ダウンロードやパッケージ復元は不要です。外部ソースは元の書式を維持しています。
+| 操作 | 動作 |
+| --- | --- |
+| 右ボタンを押しながらマウス移動 | フリールック |
+| 右ボタン＋W / S / A / D | 前進 / 後退 / 左 / 右 |
+| 右ボタン＋Q / E | ワールドの下 / 上へ移動 |
+| 上記の移動中にShift | 一時的に4倍速 |
+| ホイール上 / 下 | 基本移動速度を増加 / 減少（0.05～100 units/s） |
+| Alt＋左ドラッグ | 現在の注視点を中心に回転 |
+| Alt＋中ドラッグ | カメラと注視点を一緒にパン |
+| Alt＋右ドラッグ、Alt＋ホイール | 注視点までの距離を変更するドリー |
+| F、またはFocus originボタン | キューブの中心を注視点にする |
+| Reset camera | 位置、注視点、角度、距離、移動速度を初期化 |
 
-RendererがImGuiの初期化、フレーム構築、描画、GPU完了後の終了処理を管理します。
-フォントなどのテクスチャには、専用のshader-visible SRVヒープ（64スロット）と割り当て／解放コールバックを使用します。
-Win32メッセージはImGuiへ転送し、キーボードナビゲーションにも対応しています。
-UIのレイアウト設定はファイルに保存しません。
+ホイールだけでは位置を動かさず、Move speedに表示する基本速度を変更します。
+右ボタンを押して移動している間もホイールで速度を調整できます。Alt＋ホイールのドリーとは分離しています。
+Camera detailsで現在位置と注視点を確認できます。
+フリールックではカメラ位置を固定して視線を変え、その先に注視点を更新します。
+パンやフリー移動後のAlt回転は、移動後の注視点を使用します。
+
+相対マウス移動はWin32 Raw Inputから取得し、画面端でも回転を継続できます。
+操作終了時はカーソルを開始位置に戻し、フォーカスを失ったら操作を解除します。
+Raw Inputを使用できない環境では通常のマウス差分にフォールバックします。
+
+共通カメラは `common/Camera.h` の入力アクションを受け取る独立したクラスです。
+ImGuiやDXRには依存せず、別のサンプルからも再利用できます。
+
+```powershell
+.\build\x64\Debug\CameraTests\CameraTests.exe
+.\build\x64\Release\CameraTests\CameraTests.exe
+```
+
+カメラテストは移動量、斜め移動、フレーム時間、Shift加速、ホイール速度の増減と上下限、フリールック、注視点回転、パン、ドリー、リセットを確認します。
 
 ## スクリーンショット
 
-撮影ボタンまたはF12キーを押すと、実行ファイルの隣の `screenshots/` に日時付きのPNGを保存します。
-`Open screenshot folder` ボタンで、このフォルダをエクスプローラーで開けます。撮影前でフォルダが存在しない場合は作成します。
-保存結果やエラーはImGuiパネルに表示します。画像サイズは撮影時のバックバッファと同じです。
-ImGui描画後、Present前のバックバッファをREADBACKバッファへコピーし、GPU完了後にWindows標準のWICでPNG化します。
-ウィンドウ枠や他のアプリは含みません。外部の画面取得ツールや追加ライブラリは不要です。
+すべてのサンプルでSave screenshot (F12)ボタンまたはF12キーを使用できます。
+実行ファイル隣のscreenshotsフォルダに日時付きPNGを保存し、Open screenshot folderでそのフォルダを開きます。
+撮影前でフォルダが存在しない場合は作成します。保存・フォルダを開く処理の失敗はパネルに表示し、描画を継続します。
+画像にはImGuiも含み、ウィンドウ枠や他のアプリは含みません。外部の画面取得ツールは不要です。
+GPU読み戻し後、Windows標準のWICでPNGを保存します。
 
-確認作業向けに、3フレーム描画して指定先へ保存し、そのまま終了するモードもあります。
-相対パスはカレントディレクトリを基準にし、保存先のフォルダは必要に応じて作成します。
-指定したファイルが存在する場合は上書きします。
+自動確認では3フレーム描画後に指定先へ撮影して終了します。
+相対パスはカレントディレクトリ基準で、必要な親フォルダを作成し、既存ファイルは上書きします。
 
 ```powershell
-$app = Start-Process -FilePath .\build\x64\Release\PathTracingSample.exe -ArgumentList '--screenshot "build/checks/screenshot.png"' -PassThru -Wait
+$app = Start-Process -FilePath .\build\x64\Release\DxrCube\DxrCube.exe -ArgumentList '--screenshot "build/checks/dxr-cube.png"' -PassThru -Wait
 $app.ExitCode
 ```
 
-成功時の終了コードは `0`、失敗時は `1` です。失敗内容は標準エラーとデバッガ出力にも書き込みます。
-自動撮影モードではエラーダイアログを表示しません。対話モードでは、保存先の書き込み失敗が起きても描画を継続します。
+成功時は終了コード0、失敗時は1です。エラー内容は標準エラーとデバッガ出力にも書き込みます。
+自動確認時はエラーダイアログを表示しません。保存したPNGも開いて、描画内容を確認してください。
 
 ## 参考
 
-- [Agility SDK公式ダウンロードとバージョン一覧](https://devblogs.microsoft.com/directx/directx12agility/)
-- [Agility SDK導入ガイド](https://devblogs.microsoft.com/directx/gettingstarted-dx12agility/)
-- [1.722-previewリリース情報](https://devblogs.microsoft.com/directx/agilitysdk-1-620-retail-and-1-722-preview/)
+- [Agility SDK公式ダウンロード](https://devblogs.microsoft.com/directx/directx12agility/)
+- [DXR機能仕様](https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html)
+- [Microsoft DXR Hello World](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingHelloWorld)
 - [Dear ImGui v1.93.0](https://github.com/ocornut/imgui/tree/v1.93.0)
-- [Dear ImGuiのWin32 / DirectX 12公式サンプル](https://github.com/ocornut/imgui/blob/v1.93.0/examples/example_win32_directx12/main.cpp)
