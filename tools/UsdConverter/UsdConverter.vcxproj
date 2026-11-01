@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<ItemGroup Label="ProjectConfigurations">
+		<ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+		<ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+	</ItemGroup>
+	<PropertyGroup Label="Globals">
+		<ProjectGuid>{F45EAF56-619C-447E-AF5D-129A574C5260}</ProjectGuid>
+		<RepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</RepositoryRoot>
+		<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+	</PropertyGroup>
+	<Import Project="$(RepositoryRoot)build_support\Usd.local.props" Condition="Exists('$(RepositoryRoot)build_support\Usd.local.props')" />
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+	<PropertyGroup Label="Configuration">
+		<ConfigurationType>Application</ConfigurationType>
+		<PlatformToolset>v145</PlatformToolset>
+		<CharacterSet>Unicode</CharacterSet>
+		<UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+		<UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
+		<OpenUsdRoot Condition="'$(OpenUsdRoot)'==''">$(OPENUSD_ROOT)</OpenUsdRoot>
+		<OpenUsdDebugRoot Condition="'$(OpenUsdDebugRoot)'==''">$(OPENUSD_DEBUG_ROOT)</OpenUsdDebugRoot>
+		<UsdSdkRoot Condition="'$(Configuration)'=='Release'">$(OpenUsdRoot)</UsdSdkRoot>
+		<UsdSdkRoot Condition="'$(Configuration)'=='Debug'">$(OpenUsdDebugRoot)</UsdSdkRoot>
+		<TbbLibrary Condition="'$(Configuration)'=='Release'">tbb.lib</TbbLibrary>
+		<TbbLibrary Condition="'$(Configuration)'=='Debug'">tbb_debug.lib</TbbLibrary>
+	</PropertyGroup>
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+	<PropertyGroup>
+		<OutDir>$(RepositoryRoot)build\$(Platform)\$(Configuration)\UsdConverter\</OutDir>
+		<IntDir>$(RepositoryRoot)build\obj\$(Platform)\$(Configuration)\UsdConverter\</IntDir>
+	</PropertyGroup>
+	<ItemDefinitionGroup>
+		<ClCompile>
+			<LanguageStandard>stdcpp20</LanguageStandard>
+			<WarningLevel>Level4</WarningLevel>
+			<ExceptionHandling>Sync</ExceptionHandling>
+			<ConformanceMode>true</ConformanceMode>
+			<ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+			<AdditionalOptions>/utf-8 /external:I "$(UsdSdkRoot)\include" %(AdditionalOptions)</AdditionalOptions>
+			<AdditionalIncludeDirectories>$(RepositoryRoot)common;$(UsdSdkRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+			<PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;TBB_SUPPRESS_DEPRECATED_MESSAGES=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+		</ClCompile>
+		<Link>
+			<SubSystem>Console</SubSystem>
+			<AdditionalLibraryDirectories>$(UsdSdkRoot)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+			<AdditionalDependencies>usd_ms.lib;$(TbbLibrary);%(AdditionalDependencies)</AdditionalDependencies>
+			<GenerateDebugInformation>true</GenerateDebugInformation>
+		</Link>
+	</ItemDefinitionGroup>
+	<ItemGroup>
+		<ClCompile Include="Main.cpp" />
+		<ClCompile Include="$(RepositoryRoot)common\SceneFile.cpp" />
+		<ClInclude Include="$(RepositoryRoot)common\SceneFile.h" />
+	</ItemGroup>
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+	<Target Name="CheckUsdSdk" BeforeTargets="PrepareForBuild">
+		<Error Condition="!Exists('$(UsdSdkRoot)\include\pxr\pxr.h') OR !Exists('$(UsdSdkRoot)\lib\usd_ms.lib')" Text="Set OpenUsdRoot / OpenUsdDebugRoot to a monolithic OpenUSD install, using Usd.local.props or MSBuild properties. The renderer does not require this SDK." />
+	</Target>
+	<Target Name="DeployUsdRuntime" AfterTargets="Build">
+		<ItemGroup>
+			<UsdRuntime Include="$(UsdSdkRoot)\lib\usd_ms.dll;$(UsdSdkRoot)\bin\tbb*.dll" />
+			<UsdPlugin Include="$(UsdSdkRoot)\lib\usd\**\*.*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(UsdRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(UsdPlugin)" DestinationFolder="$(OutDir)usd\%(RecursiveDir)" SkipUnchangedFiles="true" />
+	</Target>
+</Project>

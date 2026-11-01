@@ -285,76 +285,7 @@ void DxrCube::resizeOutput(UINT width, UINT height)
 
 void DxrCube::update(Renderer& renderer, float deltaTime)
 {
-	const ImGuiIO& io = ImGui::GetIO();
-	if (io.AppFocusLost)
-	{
-		mCameraDrag = CameraMode::None;
-		mRestoreCursor = false;
-		return;
-	}
-	const ImGuiMouseButton dragButton = mCameraDrag == CameraMode::Orbit ? ImGuiMouseButton_Left
-		: mCameraDrag == CameraMode::Pan ? ImGuiMouseButton_Middle : ImGuiMouseButton_Right;
-	if (mCameraDrag != CameraMode::None && !ImGui::IsMouseDown(dragButton))
-	{
-		mCameraDrag = CameraMode::None;
-		if (mRestoreCursor)
-		{
-			SetCursorPos(mDragCursorPosition.x, mDragCursorPosition.y);
-			mRestoreCursor = false;
-		}
-	}
-	bool startedDrag = false;
-	if (mCameraDrag == CameraMode::None && !io.WantCaptureMouse)
-	{
-		if (io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-		{
-			mCameraDrag = CameraMode::Orbit;
-		}
-		else if (io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-		{
-			mCameraDrag = CameraMode::Pan;
-		}
-		else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
-		{
-			mCameraDrag = io.KeyAlt ? CameraMode::Dolly : CameraMode::FreeLook;
-		}
-		if (mCameraDrag != CameraMode::None)
-		{
-			startedDrag = true;
-			ImGui::SetWindowFocus(nullptr);
-			mRestoreCursor = GetCursorPos(&mDragCursorPosition) != FALSE;
-		}
-	}
-	CameraInput input;
-	input.mMode = mCameraDrag;
-	input.mViewportHeight = static_cast<float>(renderer.height());
-	if (mCameraDrag != CameraMode::None)
-	{
-		ImGui::SetMouseCursor(ImGuiMouseCursor_None);
-		if (!startedDrag)
-		{
-			const auto& motion = renderer.mouseMotion();
-			input.mMouseDeltaX = motion.mUseRawMouse ? motion.mDeltaX : io.MouseDelta.x;
-			input.mMouseDeltaY = motion.mUseRawMouse ? motion.mDeltaY : io.MouseDelta.y;
-		}
-	}
-	if (mCameraDrag == CameraMode::FreeLook && !io.WantTextInput && !ImGui::IsAnyItemActive())
-	{
-		input.mMoveForward = (ImGui::IsKeyDown(ImGuiKey_W) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(ImGuiKey_S) ? 1.0f : 0.0f);
-		input.mMoveRight = (ImGui::IsKeyDown(ImGuiKey_D) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(ImGuiKey_A) ? 1.0f : 0.0f);
-		input.mMoveUp = (ImGui::IsKeyDown(ImGuiKey_E) ? 1.0f : 0.0f) - (ImGui::IsKeyDown(ImGuiKey_Q) ? 1.0f : 0.0f);
-		input.mFast = io.KeyShift;
-	}
-	if (!io.WantCaptureMouse || mCameraDrag != CameraMode::None)
-	{
-		input.mSpeedWheel = io.KeyAlt ? 0.0f : io.MouseWheel;
-		input.mDollyWheel = io.KeyAlt ? io.MouseWheel : 0.0f;
-	}
-	if (!io.WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_F, false))
-	{
-		mCamera.focus({0, 0, 0});
-	}
-	mCamera.update(input, deltaTime);
+	mCameraController.update(mCamera, renderer, deltaTime);
 }
 
 void DxrCube::drawGui()

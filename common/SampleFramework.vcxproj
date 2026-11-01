@@ -8,10 +8,14 @@
   <ItemGroup>
     <ClCompile Include="Application.cpp" />
     <ClCompile Include="Camera.cpp" />
+    <ClCompile Include="CameraController.cpp" />
+    <ClCompile Include="SceneFile.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="Screenshot.cpp" />
     <ClInclude Include="Sample.h" />
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="CameraController.h" />
+    <ClInclude Include="SceneFile.h" />
     <ClInclude Include="MouseMotion.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Screenshot.h" />

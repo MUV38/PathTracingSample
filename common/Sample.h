@@ -4,6 +4,8 @@
 
 #include <filesystem>
 #include <functional>
+#include <string>
+#include <vector>
 
 class Renderer;
 struct ID3D12GraphicsCommandList;
@@ -15,6 +17,8 @@ struct Sample
 {
 	const wchar_t* mName = L"DirectX 12 Sample";
 	bool mRequireDxr = false;
+	std::function<void(const std::vector<std::wstring>&)> mConfigure;
+	std::function<bool()> mReadyForScreenshot;
 	std::function<void(Renderer&)> mInitialize;
 	// Runs after ImGui::NewFrame(), before building UI, so capture flags are current.
 	std::function<void(Renderer&, float)> mUpdate;

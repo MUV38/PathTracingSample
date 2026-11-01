@@ -9,8 +9,10 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | --- | --- | --- |
 | PathTracingSample | 画面クリア、ImGui、スクリーンショット | DirectX 12。ハードウェアが利用できなければWARP |
 | DxrCube | 12枚の三角形のキューブをDXRで描画 | DXR Tier 1.0以上に対応するGPUとドライバ |
+| UsdKitchen | 外部で変換したUSDのバイナリをDXRで描画。アプリから変換ツールを起動可能 | DXR Tier 1.0以上 |
 | SampleFramework | 上記で共有する静的ライブラリ | 単独では起動しません |
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
+| SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
 
 DXRキューブは1個のBLASとTLAS、レイトレーシングPSO、シェーダーテーブルを構築し、
 DispatchRays()からRay Generation / Miss / Closest Hitシェーダーを実行します。
@@ -30,7 +32,7 @@ Closest Hitで面の法線に応じた拡散照明を計算します。カメラ
 1. ルートの `PathTracingSample.slnx` をVisual Studio 2026で開きます。
 2. 初回はソリューションを右クリックして「NuGetパッケージの復元」を実行します。
 3. `Debug | x64` または `Release | x64` を選んでビルドします。
-4. 起動したいサンプルを右クリックし、スタートアッププロジェクトに設定します（既定はDxrCube）。
+4. 起動したいサンプルを右クリックし、スタートアッププロジェクトに設定します（既定はUsdKitchen）。
 5. F5でデバッグ実行、Ctrl+F5でデバッグなしで実行します。
 
 Developer PowerShell for VS 2026からは次のコマンドも使用できます。
@@ -51,11 +53,22 @@ packages.configの公式Agility SDKをルートのpackagesフォルダに復元�
 各実行ファイルはD3D12SDKVersion = 722と、相対パスD3D12を示すD3D12SDKPathをエクスポートします。
 Agility SDKは将来のCLAS利用を見据えた指定版を維持しています。DXR対応の表示はCLAS対応を意味しません。
 
+## USDモデルとKitchen Set
+
+`UsdKitchen` は `.ptscene` 独自バイナリだけを読み込み、OpenUSDにはリンクしません。
+初期表示は同梱の自作 **Preview Room**（192三角形）です。Pixar Kitchen Setは含みません。
+USDを変換する別ソリューションは `tools/UsdConverter/UsdConverter.slnx` です。
+既存OpenUSD SDKの指定、変換と表示、Kitchen Setの入手後の手順は
+[USDサンプルの説明](samples/UsdKitchen/README.md) と [変換ツールの説明](tools/UsdConverter/README.md) を参照してください。
+
 ## 構成とサンプル追加
 
 - `common/`: ウィンドウ、DirectX 12初期化、ImGui、GPU同期、撮影を共有するSampleFramework
 - `samples/Clear/`: 既存の画面クリアサンプルのエントリーポイント
 - `samples/DxrCube/`: DXRキューブのC++とHLSL、独立した実行プロジェクト
+- `samples/UsdKitchen/`: 変換済みシーンのDXR表示、外部変換プロセスの呼び出し
+- `tools/UsdConverter/`: OpenUSD SDKを使用する独立した変換ソリューション
+- `assets/`: 自作プレビューのUSDソースと変換済みバイナリ。入手したモデルはGit管理外の `assets/local/` へ配置
 - `build_support/`: 全プロジェクトの共通Visual Studio設定とAgility SDK設定
 - `third_party/imgui/`: ライセンス付きの公式ソース。元の書式を維持
 

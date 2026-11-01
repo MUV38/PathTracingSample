@@ -1,0 +1,53 @@
+#pragma once
+
+#include "CameraController.h"
+#include "MeshRaytracer.h"
+
+#include <filesystem>
+#include <string>
+#include <vector>
+
+class Renderer;
+
+class UsdKitchen final
+{
+public:
+	~UsdKitchen();
+	void configure(const std::vector<std::wstring>& arguments);
+	void initialize(Renderer& renderer);
+	void update(Renderer& renderer, float deltaTime);
+	void drawGui();
+	void render(Renderer& renderer, ID3D12GraphicsCommandList* commands, ID3D12Resource* backBuffer);
+	bool readyForScreenshot() const { return mHasScene && !mConversionProcess; }
+
+private:
+	void loadModel(const std::filesystem::path& path);
+	void frameModel();
+	void startConversion();
+	void pollConversion();
+	void cancelConversion();
+	void readConversionLog();
+	Renderer* mRenderer = nullptr;
+	MeshRaytracer mRaytracer;
+	Camera mCamera;
+	CameraController mController;
+	SceneHeader mHeader;
+	DirectX::XMFLOAT3 mFocusPoint{};
+	float mRadius = 1.0f;
+	float mViewportLeft = 0.0f;
+	float mExposure = 1.0f;
+	bool mHeadlight = true;
+	bool mHasScene = false;
+	bool mStartupConversion = false;
+	bool mNeedsFrame = false;
+	std::filesystem::path mModelPath;
+	std::filesystem::path mStartupUsd;
+	std::filesystem::path mConfiguredConverter;
+	std::filesystem::path mPendingBinary;
+	std::filesystem::path mLogPath;
+	std::array<char, 4096> mUsdInput{};
+	std::array<char, 4096> mConverterInput{};
+	std::string mStatus;
+	std::string mLog;
+	HANDLE mConversionProcess = nullptr;
+};

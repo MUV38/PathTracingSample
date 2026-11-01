@@ -31,6 +31,7 @@ public:
 	const std::wstring& adapterName() const { return mAdapterName; }
 	bool supportsRaytracing() const { return mRaytracingSupported; }
 	ID3D12Device* device() const { return mDevice.Get(); }
+	HWND window() const { return mWindow; }
 	ID3D12CommandQueue* commandQueue() const { return mQueue.Get(); }
 	UINT width() const { return mWidth; }
 	UINT height() const { return mHeight; }
@@ -78,4 +79,5 @@ private:
 	bool mScreenshotSucceeded = false;
 	const Sample* mSample = nullptr;
 	MouseMotion mMouseMotion;
+	HWND mWindow = nullptr;
 };

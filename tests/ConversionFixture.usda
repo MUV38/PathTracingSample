@@ -1,0 +1,20 @@
+#usda 1.0
+(
+	metersPerUnit = 0.01
+	upAxis = "Z"
+)
+def Xform "Translated"
+{
+	double3 xformOp:translate = (100, 200, 300)
+	uniform token[] xformOpOrder = ["xformOp:translate"]
+	def Mesh "Concave"
+	{
+		point3f[] points = [(0,0,0), (200,0,0), (200,200,0), (100,100,0), (0,200,0)]
+		int[] faceVertexCounts = [5]
+		int[] faceVertexIndices = [0,1,2,3,4]
+		normal3f[] normals = [(0,0,1)] (interpolation = "constant")
+		color3f[] primvars:displayColor = [(0.2,0.4,0.6)] (interpolation = "faceVarying")
+		int[] primvars:displayColor:indices = [0,0,0,0,0]
+		uniform token subdivisionScheme = "none"
+	}
+}

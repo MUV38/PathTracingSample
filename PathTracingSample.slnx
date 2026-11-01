@@ -3,13 +3,15 @@
     <Platform Name="x64" />
   </Configurations>
   <Folder Name="/Common/">
-    <Project Path="common/SampleFramework.vcxproj" />
+    <Project Path="common/SampleFramework.vcxproj" Id="15ab62db-3209-43ed-874f-71efa2815baa" />
   </Folder>
   <Folder Name="/Samples/">
     <Project Path="PathTracingSample.vcxproj" Id="65ea1ca1-5843-35c0-9fbc-420bc2c3c72e" />
-    <Project Path="samples/DxrCube/DxrCube.vcxproj" DefaultStartup="true" />
+    <Project Path="samples/DxrCube/DxrCube.vcxproj" Id="1cadce68-c963-4f5f-a5f8-6ecb2a9b9439" />
+    <Project Path="samples/UsdKitchen/UsdKitchen.vcxproj" DefaultStartup="true" Id="f4680a75-5d93-4afb-a63a-79dc02ccb6c8" />
   </Folder>
   <Folder Name="/Tests/">
-    <Project Path="tests/CameraTests.vcxproj" />
+    <Project Path="tests/CameraTests.vcxproj" Id="b2a41a65-0885-4a57-b9e6-f14cc56f2c94" />
+    <Project Path="tests/SceneFileTests.vcxproj" Id="410f9919-95aa-41a3-aebf-818b8936c841" />
   </Folder>
 </Solution>

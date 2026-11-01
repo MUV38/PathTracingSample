@@ -57,6 +57,7 @@ Renderer::~Renderer()
 void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sample)
 {
 	mSample = &sample;
+	mWindow = window;
 	UINT factoryFlags = 0;
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> debug;

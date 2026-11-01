@@ -140,6 +140,7 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 	HWND window = nullptr;
 	WindowState state;
 	bool screenshotMode = false;
+	bool commandLineMode = false;
 	try
 	{
 		int argumentCount = 0;
@@ -149,15 +150,32 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		{
 			throw std::runtime_error("Cannot parse command line arguments.");
 		}
-		screenshotMode = argumentCount > 1;
+		commandLineMode = argumentCount > 1;
 		std::filesystem::path screenshotPath;
-		if (screenshotMode)
+		std::vector<std::wstring> sampleArguments;
+		for (int index = 1; index < argumentCount; ++index)
 		{
-			if (argumentCount != 3 || std::wstring_view(arguments.get()[1]) != L"--screenshot" || arguments.get()[2][0] == L'\0')
+			if (std::wstring_view(arguments.get()[index]) == L"--screenshot")
 			{
-				throw std::runtime_error("Usage: <sample.exe> [--screenshot <output.png>]");
+				if (screenshotMode || ++index >= argumentCount || arguments.get()[index][0] == L'\0')
+				{
+					throw std::runtime_error("Usage: <sample.exe> [--screenshot <output.png>] [sample options]");
+				}
+				screenshotMode = true;
+				screenshotPath = arguments.get()[index];
 			}
-			screenshotPath = arguments.get()[2];
+			else
+			{
+				sampleArguments.emplace_back(arguments.get()[index]);
+			}
+		}
+		if (sample.mConfigure)
+		{
+			sample.mConfigure(sampleArguments);
+		}
+		else if (!sampleArguments.empty())
+		{
+			throw std::runtime_error("This sample only accepts --screenshot <output.png>.");
 		}
 		SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 		constexpr wchar_t ClassName[] = L"PathTracingSampleWindow";
@@ -214,7 +232,8 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 			{
 				renderer.resize(state.mWidth, state.mHeight);
 				renderer.setMouseMotion(std::exchange(state.mMouseMotion, MouseMotion{0.0f, 0.0f, state.mRawMouseRegistered}));
-				const bool captureAndExit = screenshotMode && renderedFrames >= 2;
+				const bool captureAndExit = screenshotMode && renderedFrames >= 2
+					&& (!sample.mReadyForScreenshot || sample.mReadyForScreenshot());
 				if (captureAndExit || state.mScreenshotRequested)
 				{
 					renderer.requestScreenshot(captureAndExit ? screenshotPath : std::filesystem::path{});
@@ -241,7 +260,7 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 	{
 		OutputDebugStringA(error.what());
 		std::fprintf(stderr, "%s\n", error.what());
-		if (!screenshotMode)
+		if (!commandLineMode)
 		{
 			MessageBoxA(window, error.what(), "PathTracingSample - Error", MB_OK | MB_ICONERROR);
 		}

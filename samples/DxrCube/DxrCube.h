@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Camera.h"
+#include "CameraController.h"
 
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -37,9 +38,7 @@ private:
 	UINT mWidth = 0;
 	UINT mHeight = 0;
 	Camera mCamera;
-	CameraMode mCameraDrag = CameraMode::None;
-	POINT mDragCursorPosition{};
-	bool mRestoreCursor = false;
+	CameraController mCameraController;
 	float mViewportLeft = 0.0f;
 	std::array<float, 3> mAlbedo{0.2f, 0.62f, 0.95f};
 };

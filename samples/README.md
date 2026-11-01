@@ -43,6 +43,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 | --- | --- |
 | `mName` | ウィンドウのタイトル |
 | `mRequireDxr` | DXR必須ならtrue。対応GPUを選択し、存在しない場合は明示的にエラー終了 |
+| `mConfigure(arguments)` | 共通の `--screenshot` を除いたコマンドライン引数をウィンドウ作成前に処理 |
+| `mReadyForScreenshot()` | 非同期処理完了後に撮影する必要があれば設定。trueになるまで自動撮影を待機 |
 | `mInitialize(Renderer&)` | デバイス・ImGui初期化後に1回実行。サンプルのリソースを作成 |
 | `mUpdate(Renderer&, deltaTime)` | ImGuiのNewFrame後、UI構築前に入力と状態を更新 |
 | `mDrawGui()` | 共通パネル内にサンプル固有のコントロールを配置 |
@@ -61,4 +63,5 @@ DXRシェーダーのDXCカスタムビルドは `DxrCube.vcxproj` を参考に�
 
 カメラは `common/Camera.h` の `Camera` と `CameraInput` を再利用できます。
 カメラ本体はWin32 / ImGuiから独立しており、サンプル側でUIの入力キャプチャ状態を確認してアクションを渡します。
-Raw Inputの相対マウス移動は `renderer.mouseMotion()` で取得できます。入力の振り分けは `DxrCube::update()` が実例です。
+Raw Inputの相対マウス移動は `renderer.mouseMotion()` で取得できます。共通の入力振り分けには `common/CameraController` を使用できます。
+`DxrCube::update()` と `UsdKitchen::update()` が実例です。
