@@ -1,0 +1,4 @@
+/build/
+/.vs/
+/packages/
+*.vcxproj.user

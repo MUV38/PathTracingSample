@@ -1,0 +1,6 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="PathTracingSample.vcxproj" DefaultStartup="true" Id="65ea1ca1-5843-35c0-9fbc-420bc2c3c72e" />
+</Solution>
