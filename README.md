@@ -51,6 +51,7 @@ msbuild PathTracingSample.slnx /restore /p:RestorePackagesConfig=true /p:Configu
 - `Clear color` で背景色を変更し、`Reset clear color` で初期色へ戻せます。
 - `Show ImGui demo` で公式デモウィンドウの表示を切り替えられます。
 - ImGuiがキーボード入力を使用している間は、Escによるアプリ終了を抑制します。
+- `Save screenshot (F12)` ボタンまたはF12キーで、ImGuiを含む描画結果をPNGへ保存します。
 
 `src/Main.cpp` がウィンドウとメッセージループ、`src/Renderer.cpp` がDirectX 12の初期化と描画を担当します。
 クリア色はUI、または `Renderer` の `mClearColor` で変更できます。
@@ -65,6 +66,26 @@ RendererがImGuiの初期化、フレーム構築、描画、GPU完了後の終�
 フォントなどのテクスチャには、専用のshader-visible SRVヒープ（64スロット）と割り当て／解放コールバックを使用します。
 Win32メッセージはImGuiへ転送し、キーボードナビゲーションにも対応しています。
 UIのレイアウト設定はファイルに保存しません。
+
+## スクリーンショット
+
+撮影ボタンまたはF12キーを押すと、実行ファイルの隣の `screenshots/` に日時付きのPNGを保存します。
+`Open screenshot folder` ボタンで、このフォルダをエクスプローラーで開けます。撮影前でフォルダが存在しない場合は作成します。
+保存結果やエラーはImGuiパネルに表示します。画像サイズは撮影時のバックバッファと同じです。
+ImGui描画後、Present前のバックバッファをREADBACKバッファへコピーし、GPU完了後にWindows標準のWICでPNG化します。
+ウィンドウ枠や他のアプリは含みません。外部の画面取得ツールや追加ライブラリは不要です。
+
+確認作業向けに、3フレーム描画して指定先へ保存し、そのまま終了するモードもあります。
+相対パスはカレントディレクトリを基準にし、保存先のフォルダは必要に応じて作成します。
+指定したファイルが存在する場合は上書きします。
+
+```powershell
+$app = Start-Process -FilePath .\build\x64\Release\PathTracingSample.exe -ArgumentList '--screenshot "build/checks/screenshot.png"' -PassThru -Wait
+$app.ExitCode
+```
+
+成功時の終了コードは `0`、失敗時は `1` です。失敗内容は標準エラーとデバッガ出力にも書き込みます。
+自動撮影モードではエラーダイアログを表示しません。対話モードでは、保存先の書き込み失敗が起きても描画を継続します。
 
 ## 参考
 

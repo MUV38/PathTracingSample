@@ -1,15 +1,29 @@
 #include "Renderer.h"
+#include "Screenshot.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
+#include <shellapi.h>
 
 #include <cassert>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
+std::filesystem::path screenshotDirectory()
+{
+	std::array<wchar_t, 32768> executablePath{};
+	const DWORD length = GetModuleFileNameW(nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
+	if (length == 0 || length >= executablePath.size())
+	{
+		throw std::runtime_error("Cannot locate the screenshot output directory.");
+	}
+	return std::filesystem::path(executablePath.data()).parent_path() / L"screenshots";
+}
+
 void check(HRESULT result, const char* operation)
 {
 	if (FAILED(result))
@@ -231,6 +245,16 @@ void Renderer::drawGui()
 			mClearColor = {0.035f, 0.075f, 0.14f, 1.0f};
 		}
 		ImGui::Checkbox("Show ImGui demo", &mShowDemoWindow);
+		ImGui::Separator();
+		if (ImGui::Button("Save screenshot (F12)"))
+		{
+			requestScreenshot();
+		}
+		if (ImGui::Button("Open screenshot folder"))
+		{
+			openScreenshotDirectory();
+		}
+		ImGui::TextWrapped("%s", mScreenshotStatus.empty() ? "Screenshots include the ImGui panel." : mScreenshotStatus.c_str());
 	}
 	ImGui::End();
 	if (mShowDemoWindow)
@@ -287,6 +311,9 @@ void Renderer::resize(UINT width, UINT height)
 void Renderer::render()
 {
 	drawGui();
+	const auto screenshotPath = std::exchange(mScreenshotPath, {});
+	Screenshot screenshot;
+	bool screenshotRecorded = false;
 	const UINT index = mSwapChain->GetCurrentBackBufferIndex();
 	check(mAllocator->Reset(), "Reset command allocator");
 	check(mCommandList->Reset(mAllocator.Get(), nullptr), "Reset command list");
@@ -306,6 +333,18 @@ void Renderer::render()
 	ID3D12DescriptorHeap* heaps[] = {mGuiSrvHeap.Get()};
 	mCommandList->SetDescriptorHeaps(1, heaps);
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
+	if (!screenshotPath.empty())
+	{
+		try
+		{
+			screenshot.record(mDevice.Get(), mCommandList.Get(), mRenderTargets[index].Get());
+			screenshotRecorded = true;
+		}
+		catch (const std::exception& error)
+		{
+			mScreenshotStatus = std::string("Screenshot failed: ") + error.what();
+		}
+	}
 
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
 	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -316,4 +355,65 @@ void Renderer::render()
 	check(mSwapChain->Present(1, 0), "Present");
 	// One frame in flight keeps allocator/resource lifetime explicit at this first milestone.
 	waitForGpu();
+	if (screenshotRecorded)
+	{
+		try
+		{
+			screenshot.savePng(screenshotPath);
+			mScreenshotSucceeded = true;
+			const auto filename = screenshotPath.filename().u8string();
+			mScreenshotStatus = "Saved: " + std::string(filename.begin(), filename.end());
+		}
+		catch (const std::exception& error)
+		{
+			mScreenshotStatus = std::string("Screenshot failed: ") + error.what();
+			OutputDebugStringA(mScreenshotStatus.c_str());
+		}
+	}
+}
+
+void Renderer::requestScreenshot(const std::filesystem::path& path)
+{
+	mScreenshotSucceeded = false;
+	if (!path.empty())
+	{
+		mScreenshotPath = path;
+		return;
+	}
+	SYSTEMTIME time{};
+	GetLocalTime(&time);
+	wchar_t filename[128]{};
+	swprintf_s(filename, L"screenshot-%04u%02u%02u-%02u%02u%02u-%03u-%lu.png",
+		time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond,
+		time.wMilliseconds, GetCurrentProcessId());
+	mScreenshotPath = screenshotDirectory() / filename;
+}
+
+void Renderer::openScreenshotDirectory()
+{
+	try
+	{
+		const auto directory = screenshotDirectory();
+		std::filesystem::create_directories(directory);
+		const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+		if (comResult != RPC_E_CHANGED_MODE)
+		{
+			check(comResult, "Initialize COM for opening the screenshot folder");
+		}
+		const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+		if (SUCCEEDED(comResult))
+		{
+			CoUninitialize();
+		}
+		if (result <= 32)
+		{
+			throw std::runtime_error("Cannot open the screenshot folder (ShellExecute error " + std::to_string(result) + ").");
+		}
+		mScreenshotStatus = "Opened screenshot folder.";
+	}
+	catch (const std::exception& error)
+	{
+		mScreenshotStatus = std::string("Open folder failed: ") + error.what();
+		OutputDebugStringA(mScreenshotStatus.c_str());
+	}
 }

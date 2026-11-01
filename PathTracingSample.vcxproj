@@ -58,7 +58,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;user32.lib;d3dcompiler.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;user32.lib;d3dcompiler.lib;dwmapi.lib;windowscodecs.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
@@ -85,6 +85,7 @@
   <ItemGroup>
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\Renderer.cpp" />
+    <ClCompile Include="src\Screenshot.cpp" />
     <ClCompile Include="third_party\imgui\imgui.cpp" />
     <ClCompile Include="third_party\imgui\imgui_draw.cpp" />
     <ClCompile Include="third_party\imgui\imgui_tables.cpp" />
@@ -93,6 +94,7 @@
     <ClCompile Include="third_party\imgui\backends\imgui_impl_dx12.cpp" />
     <ClCompile Include="third_party\imgui\backends\imgui_impl_win32.cpp" />
     <ClInclude Include="src\Renderer.h" />
+    <ClInclude Include="src\Screenshot.h" />
     <ClInclude Include="third_party\imgui\imgui.h" />
     <ClInclude Include="third_party\imgui\imgui_internal.h" />
     <ClInclude Include="third_party\imgui\imconfig.h" />

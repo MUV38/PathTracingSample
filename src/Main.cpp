@@ -2,9 +2,13 @@
 
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
+#include <shellapi.h>
 
 #include <exception>
+#include <cstdio>
+#include <memory>
 #include <stdexcept>
+#include <string_view>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -22,6 +26,7 @@ struct WindowState
 	UINT mWidth = 1280;
 	UINT mHeight = 720;
 	bool mMinimized = false;
+	bool mScreenshotRequested = false;
 };
 
 LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -49,6 +54,14 @@ LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 	case WM_ERASEBKGND:
 		return 1;
 	case WM_KEYDOWN:
+		if (wParam == VK_F12)
+		{
+			if (state && (lParam & (1LL << 30)) == 0)
+			{
+				state->mScreenshotRequested = true;
+			}
+			return 0;
+		}
 		if (wParam == VK_ESCAPE && (!ImGui::GetCurrentContext() || !ImGui::GetIO().WantCaptureKeyboard))
 		{
 			DestroyWindow(window);
@@ -67,8 +80,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
 	HWND window = nullptr;
 	WindowState state;
+	bool screenshotMode = false;
 	try
 	{
+		int argumentCount = 0;
+		const std::unique_ptr<wchar_t*, decltype(&LocalFree)> arguments(
+			CommandLineToArgvW(GetCommandLineW(), &argumentCount), LocalFree);
+		if (!arguments)
+		{
+			throw std::runtime_error("Cannot parse command line arguments.");
+		}
+		screenshotMode = argumentCount > 1;
+		std::filesystem::path screenshotPath;
+		if (screenshotMode)
+		{
+			if (argumentCount != 3 || std::wstring_view(arguments.get()[1]) != L"--screenshot" || arguments.get()[2][0] == L'\0')
+			{
+				throw std::runtime_error("Usage: PathTracingSample.exe [--screenshot <output.png>]");
+			}
+			screenshotPath = arguments.get()[2];
+		}
 		SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 		constexpr wchar_t ClassName[] = L"PathTracingSampleWindow";
 		WNDCLASSEXW windowClass{};
@@ -104,6 +135,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 		ShowWindow(window, showCommand);
 
 		MSG message{};
+		UINT renderedFrames = 0;
 		while (message.message != WM_QUIT)
 		{
 			if (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
@@ -118,7 +150,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 			else
 			{
 				renderer.resize(state.mWidth, state.mHeight);
+				const bool captureAndExit = screenshotMode && renderedFrames >= 2;
+				if (captureAndExit || state.mScreenshotRequested)
+				{
+					renderer.requestScreenshot(captureAndExit ? screenshotPath : std::filesystem::path{});
+					state.mScreenshotRequested = false;
+				}
 				renderer.render();
+				++renderedFrames;
+				if (captureAndExit)
+				{
+					const int result = renderer.screenshotSucceeded() ? 0 : 1;
+					if (result != 0)
+					{
+						std::fprintf(stderr, "%s\n", renderer.screenshotStatus().c_str());
+					}
+					DestroyWindow(window);
+					return result;
+				}
 			}
 		}
 		renderer.waitForGpu();
@@ -127,7 +176,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 	catch (const std::exception& error)
 	{
 		OutputDebugStringA(error.what());
-		MessageBoxA(window, error.what(), "PathTracingSample - Error", MB_OK | MB_ICONERROR);
+		std::fprintf(stderr, "%s\n", error.what());
+		if (!screenshotMode)
+		{
+			MessageBoxA(window, error.what(), "PathTracingSample - Error", MB_OK | MB_ICONERROR);
+		}
 		if (window && IsWindow(window))
 		{
 			DestroyWindow(window);
