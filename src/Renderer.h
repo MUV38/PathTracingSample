@@ -34,6 +34,7 @@ private:
 	void createRenderTargets();
 	void initializeGui(HWND window);
 	void drawGui();
+	void openScreenshotDirectory();
 	void allocateGuiDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle);
 	void freeGuiDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle);
 
