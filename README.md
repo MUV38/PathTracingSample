@@ -1,7 +1,7 @@
 # PathTracingSample
 
 DXRによるPath Tracing実装に向けた、Win32 / DirectX 12の最初のステップです。
-現段階では1280 × 720のウィンドウを開き、バックバッファを濃い青色でクリアして表示します。
+現段階では1280 × 720のウィンドウを開き、画面クリアとDear ImGuiによる操作パネルを表示します。
 
 ## 必要な環境
 
@@ -47,12 +47,29 @@ msbuild PathTracingSample.slnx /restore /p:RestorePackagesConfig=true /p:Configu
 - Escまたはウィンドウの閉じるボタンで終了します。
 - Debugでは利用可能ならD3D12デバッグレイヤーを有効にします。
 - 初期化や描画の失敗時には、処理名とHRESULTをダイアログに表示します。
+- ImGuiパネルにFPS、フレーム時間、バックバッファのサイズ、DXR対応状況を表示します。
+- `Clear color` で背景色を変更し、`Reset clear color` で初期色へ戻せます。
+- `Show ImGui demo` で公式デモウィンドウの表示を切り替えられます。
+- ImGuiがキーボード入力を使用している間は、Escによるアプリ終了を抑制します。
 
 `src/Main.cpp` がウィンドウとメッセージループ、`src/Renderer.cpp` がDirectX 12の初期化と描画を担当します。
-クリア色は `Renderer::render()` の `clearColor` で変更できます。
+クリア色はUI、または `Renderer` の `mClearColor` で変更できます。
+
+## Dear ImGui
+
+**Dear ImGui v1.93.0** の公式ソースとMITライセンスを `third_party/imgui/` に同梱しています。
+Win32 / DirectX 12バックエンドを使用し、Visual Studioプロジェクトから直接コンパイルします。
+ImGui用の追加ダウンロードやパッケージ復元は不要です。外部ソースは元の書式を維持しています。
+
+RendererがImGuiの初期化、フレーム構築、描画、GPU完了後の終了処理を管理します。
+フォントなどのテクスチャには、専用のshader-visible SRVヒープ（64スロット）と割り当て／解放コールバックを使用します。
+Win32メッセージはImGuiへ転送し、キーボードナビゲーションにも対応しています。
+UIのレイアウト設定はファイルに保存しません。
 
 ## 参考
 
 - [Agility SDK公式ダウンロードとバージョン一覧](https://devblogs.microsoft.com/directx/directx12agility/)
 - [Agility SDK導入ガイド](https://devblogs.microsoft.com/directx/gettingstarted-dx12agility/)
 - [1.722-previewリリース情報](https://devblogs.microsoft.com/directx/agilitysdk-1-620-retail-and-1-722-preview/)
+- [Dear ImGui v1.93.0](https://github.com/ocornut/imgui/tree/v1.93.0)
+- [Dear ImGuiのWin32 / DirectX 12公式サンプル](https://github.com/ocornut/imgui/blob/v1.93.0/examples/example_win32_directx12/main.cpp)
