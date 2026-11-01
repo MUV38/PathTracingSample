@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(RepositoryRoot)packages\Microsoft.Direct3D.D3D12.1.722.0-preview\build\native\Microsoft.Direct3D.D3D12.targets"
+            Condition="Exists('$(RepositoryRoot)packages\Microsoft.Direct3D.D3D12.1.722.0-preview\build\native\Microsoft.Direct3D.D3D12.targets')" />
+  </ImportGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(RepositoryRoot)packages\Microsoft.Direct3D.D3D12.1.722.0-preview\build\native\Microsoft.Direct3D.D3D12.targets')"
+           Text="Agility SDK is missing. Restore NuGet packages for PathTracingSample.slnx before building." />
+  </Target>
+</Project>

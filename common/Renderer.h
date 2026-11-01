@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MouseMotion.h"
+
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -9,6 +11,8 @@
 #include <filesystem>
 #include <string>
 
+struct Sample;
+
 class Renderer final
 {
 public:
@@ -17,7 +21,7 @@ public:
 	Renderer(const Renderer&) = delete;
 	Renderer& operator=(const Renderer&) = delete;
 
-	void initialize(HWND window, UINT width, UINT height);
+	void initialize(HWND window, UINT width, UINT height, const Sample& sample);
 	void resize(UINT width, UINT height);
 	void render();
 	void waitForGpu();
@@ -26,6 +30,13 @@ public:
 	const std::string& screenshotStatus() const { return mScreenshotStatus; }
 	const std::wstring& adapterName() const { return mAdapterName; }
 	bool supportsRaytracing() const { return mRaytracingSupported; }
+	ID3D12Device* device() const { return mDevice.Get(); }
+	ID3D12CommandQueue* commandQueue() const { return mQueue.Get(); }
+	UINT width() const { return mWidth; }
+	UINT height() const { return mHeight; }
+	const std::array<float, 4>& clearColor() const { return mClearColor; }
+	void setMouseMotion(const MouseMotion& motion) { mMouseMotion = motion; }
+	const MouseMotion& mouseMotion() const { return mMouseMotion; }
 
 private:
 	static constexpr UINT mBufferCount = 2;
@@ -65,4 +76,6 @@ private:
 	std::filesystem::path mScreenshotPath;
 	std::string mScreenshotStatus;
 	bool mScreenshotSucceeded = false;
+	const Sample* mSample = nullptr;
+	MouseMotion mMouseMotion;
 };

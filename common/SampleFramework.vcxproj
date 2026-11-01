@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</ProjectGuid>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="..\build_support\Cpp.props" />
+  <ItemGroup>
+    <ClCompile Include="Application.cpp" />
+    <ClCompile Include="Camera.cpp" />
+    <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Screenshot.cpp" />
+    <ClInclude Include="Sample.h" />
+    <ClInclude Include="Camera.h" />
+    <ClInclude Include="MouseMotion.h" />
+    <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Screenshot.h" />
+    <ClCompile Include="..\third_party\imgui\imgui.cpp" />
+    <ClCompile Include="..\third_party\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\third_party\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\third_party\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\third_party\imgui\imgui_demo.cpp" />
+    <ClCompile Include="..\third_party\imgui\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\third_party\imgui\backends\imgui_impl_win32.cpp" />
+    <ClInclude Include="..\third_party\imgui\imgui.h" />
+    <ClInclude Include="..\third_party\imgui\imgui_internal.h" />
+    <ClInclude Include="..\third_party\imgui\imconfig.h" />
+    <ClInclude Include="..\third_party\imgui\imstb_rectpack.h" />
+    <ClInclude Include="..\third_party\imgui\imstb_textedit.h" />
+    <ClInclude Include="..\third_party\imgui\imstb_truetype.h" />
+    <ClInclude Include="..\third_party\imgui\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\third_party\imgui\backends\imgui_impl_win32.h" />
+    <None Include="..\third_party\imgui\LICENSE.txt" />
+    <None Include="..\third_party\imgui\README.md" />
+  </ItemGroup>
+  <Import Project="..\build_support\Cpp.targets" />
+</Project>
