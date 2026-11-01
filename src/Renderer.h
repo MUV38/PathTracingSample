@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <filesystem>
 #include <string>
 
 class Renderer final
@@ -20,6 +21,9 @@ public:
 	void resize(UINT width, UINT height);
 	void render();
 	void waitForGpu();
+	void requestScreenshot(const std::filesystem::path& path = {});
+	bool screenshotSucceeded() const { return mScreenshotSucceeded; }
+	const std::string& screenshotStatus() const { return mScreenshotStatus; }
 	const std::wstring& adapterName() const { return mAdapterName; }
 	bool supportsRaytracing() const { return mRaytracingSupported; }
 
@@ -57,4 +61,7 @@ private:
 	bool mGuiDx12Initialized = false;
 	bool mShowDemoWindow = false;
 	std::array<float, 4> mClearColor{0.035f, 0.075f, 0.14f, 1.0f};
+	std::filesystem::path mScreenshotPath;
+	std::string mScreenshotStatus;
+	bool mScreenshotSucceeded = false;
 };

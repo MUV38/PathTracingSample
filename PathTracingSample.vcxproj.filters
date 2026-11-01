@@ -14,7 +14,9 @@
   <ItemGroup>
     <ClCompile Include="src\Main.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\Renderer.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\Screenshot.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="src\Renderer.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="src\Screenshot.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="third_party\imgui\imgui.cpp"><Filter>Third Party\Dear ImGui</Filter></ClCompile>
     <ClCompile Include="third_party\imgui\imgui_draw.cpp"><Filter>Third Party\Dear ImGui</Filter></ClCompile>
     <ClCompile Include="third_party\imgui\imgui_tables.cpp"><Filter>Third Party\Dear ImGui</Filter></ClCompile>
