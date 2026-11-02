@@ -102,6 +102,43 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mLighting.mShadows = false;
 			continue;
 		}
+		if ((flag == L"--bounces" || flag == L"--spp" || flag == L"--samples") && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const auto number = std::stoul(value, &consumed);
+			const uint32_t minimum = flag == L"--bounces" ? 0 : 1;
+			const uint32_t maximum = flag == L"--bounces" ? 8 : flag == L"--spp" ? 16 : 65536;
+			if (consumed != value.size() || number < minimum || number > maximum)
+			{
+				throw std::runtime_error("Bounces must be 0..8, spp 1..16, screenshot samples 1..65536.");
+			}
+			if (flag == L"--bounces")
+			{
+				mTracing.mMaxBounces = static_cast<uint32_t>(number);
+			}
+			else if (flag == L"--spp")
+			{
+				mTracing.mSamplesPerFrame = static_cast<uint32_t>(number);
+			}
+			else
+			{
+				mScreenshotSamples = number;
+			}
+			continue;
+		}
+		if (flag == L"--ibl-intensity" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const float number = std::stof(value, &consumed);
+			if (consumed != value.size() || !std::isfinite(number) || number < 0 || number > 100)
+			{
+				throw std::runtime_error("IBL intensity must be 0..100.");
+			}
+			mTracing.mEnvironmentIntensity = number;
+			continue;
+		}
 		if ((flag == L"--light" || flag == L"--ambient" || flag == L"--light-strength") && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -133,9 +170,9 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			}
 			continue;
 		}
-		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter") || index + 1 >= arguments.size())
+		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model <scene.ptscene> OR --usd <source.usd>, --converter <UsdConverter.exe>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -145,6 +182,10 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		else if (flag == L"--usd")
 		{
 			mStartupUsd = path;
+		}
+		else if (flag == L"--ibl")
+		{
+			mEnvironmentPath = path;
 		}
 		else
 		{
@@ -161,6 +202,11 @@ void UsdKitchen::initialize(Renderer& renderer)
 {
 	mRenderer = &renderer;
 	mRaytracer.initialize(renderer);
+	mRaytracer.loadEnvironment(renderer, mEnvironmentPath.empty() ? createPreviewEnvironment() : readRadianceEnvironment(mEnvironmentPath));
+	if (!mEnvironmentPath.empty())
+	{
+		mEnvironmentName = utf8(mEnvironmentPath.filename());
+	}
 	if (mConfiguredConverter.empty())
 	{
 		mConfiguredConverter = executableDirectory().parent_path() / L"UsdConverter/UsdConverter.exe";
@@ -411,7 +457,48 @@ void UsdKitchen::drawGui()
 		frameModel();
 	}
 	ImGui::SliderFloat("Exposure", &mExposure, 0.1f, 3.0f);
-	if (ImGui::CollapsingHeader("Direct lighting", ImGuiTreeNodeFlags_DefaultOpen))
+	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::Text("Accumulated samples: %llu", static_cast<unsigned long long>(mRaytracer.accumulatedSamples()));
+		int bounces = static_cast<int>(mTracing.mMaxBounces);
+		int samples = static_cast<int>(mTracing.mSamplesPerFrame);
+		ImGui::SliderInt("Diffuse bounces", &bounces, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderInt("Samples per frame", &samples, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
+		mTracing.mMaxBounces = static_cast<uint32_t>(std::clamp(bounces, 0, 8));
+		mTracing.mSamplesPerFrame = static_cast<uint32_t>(std::clamp(samples, 1, 16));
+		ImGui::SliderFloat("IBL intensity", &mTracing.mEnvironmentIntensity, 0.0f, 100.0f, "%.3f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat("IBL rotation", &mTracing.mEnvironmentRotation, -180.0f, 180.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::TextWrapped("IBL: %s", mEnvironmentName.c_str());
+		try
+		{
+			if (ImGui::Button("Open IBL (.hdr)..."))
+			{
+				const auto path = chooseFile(mRenderer->window(), L"Radiance HDR environment", L"*.hdr");
+				if (!path.empty())
+				{
+					mRaytracer.loadEnvironment(*mRenderer, readRadianceEnvironment(path));
+					mEnvironmentPath = path;
+					mEnvironmentName = utf8(path.filename());
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Preview sky"))
+			{
+				mRaytracer.loadEnvironment(*mRenderer, createPreviewEnvironment());
+				mEnvironmentPath.clear();
+				mEnvironmentName = "Built-in preview sky";
+			}
+		}
+		catch (const std::exception& error)
+		{
+			mStatus = error.what();
+		}
+		if (ImGui::Button("Reset accumulation"))
+		{
+			mRaytracer.resetAccumulation();
+		}
+	}
+	if (ImGui::CollapsingHeader("Direct lighting"))
 	{
 		int type = mLighting.mPointLight ? 1 : 0;
 		ImGui::Combo("Light type", &type, "Directional\0Point\0");
@@ -453,6 +540,6 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 {
 	if (mHasScene)
 	{
-		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mExposure, mMeshletColors, commands, backBuffer);
+		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mTracing, mExposure, mMeshletColors, commands, backBuffer);
 	}
 }

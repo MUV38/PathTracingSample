@@ -9,20 +9,22 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | --- | --- | --- |
 | PathTracingSample | 画面クリア、ImGui、スクリーンショット | DirectX 12。ハードウェアが利用できなければWARP |
 | DxrCube | 12枚の三角形のキューブをDXRで描画 | DXR Tier 1.0以上に対応するGPUとドライバ |
-| UsdKitchen | meshletバイナリのDXR描画、方向光・点光源による直接照明と影、アプリ内変換 | DXR Tier 1.1以上 |
+| UsdKitchen | meshletの拡散パストレーシング、直接・間接照明、IBL、アプリ内変換 | DXR Tier 1.1以上 |
 | SampleFramework | 上記で共有する静的ライブラリ | 単独では起動しません |
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 | SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
+| EnvironmentMapTests | Radiance HDRの復号・向き・不正入力のテスト | GPU / USD SDK不要 |
 
 DXRキューブは1個のBLASとTLAS、レイトレーシングPSO、シェーダーテーブルを構築し、
 DispatchRays()からRay Generation / Miss / Closest Hitシェーダーを実行します。
 Closest Hitで面の法線に応じた拡散照明を計算します。カメラの方位角・仰角・距離と色をImGuiから変更できます。
 リサイズ時はDXR出力テクスチャを再作成し、DXR描画後にImGuiを重ねます。
-単発の一次レイによるDXR入門サンプルです。Path Tracingの多重反射・蓄積、影、CLASはまだ実装していません。
+DxrCubeは単発の一次レイによるDXR入門サンプルです。多重反射・蓄積、影、CLASは使用していません。
 
-UsdKitchenはmeshletを読み込み、Lambert直接照明とRayQueryによるハードシャドウを描画します。
-ImGuiのDirect lightingで方向光／点光源、色・強度・位置、影、補助光を調整できます。
-詳しくは [UsdKitchenの照明設定](samples/UsdKitchen/README.md#直接照明) を参照してください。
+UsdKitchenはmeshletを読み込み、Lambert直接照明、ハードシャドウ、複数バウンスの拡散間接照明を描画します。
+Miss時はIBLを参照します。自作の空マップを既定で使い、Radiance HDRの読み込みにも対応しています。
+ImGuiで光源、IBL、バウンス数、サンプル数を調整でき、静止中はHDRのサンプルを蓄積します。
+詳しくは [UsdKitchenの照明設定](samples/UsdKitchen/README.md#間接照明とibl) を参照してください。
 
 ## ビルドと実行
 
@@ -141,6 +143,7 @@ ImGuiやDXRには依存せず、別のサンプルからも再利用できます
 GPU読み戻し後、Windows標準のWICでPNGを保存します。
 
 自動確認では3フレーム描画後に指定先へ撮影して終了します。
+UsdKitchenで蓄積後に確認する場合は `--samples 128` などを併用すると、指定数以上のサンプルが蓄積するまで待ってから撮影します。
 相対パスはカレントディレクトリ基準で、必要な親フォルダを作成し、既存ファイルは上書きします。
 
 ```powershell

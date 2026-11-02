@@ -9,7 +9,10 @@ StructuredBuffer<Vertex> vertices : register(t1);
 StructuredBuffer<uint> meshletVertices : register(t2);
 StructuredBuffer<uint4> meshlets : register(t3);
 ByteAddressBuffer meshletTriangles : register(t4);
+Texture2D<float4> environmentMap : register(t5);
+SamplerState environmentSampler : register(s0);
 RWTexture2D<float4> outputImage : register(u0);
+RWTexture2D<float4> accumulation : register(u1);
 cbuffer SceneConstants : register(b0)
 {
 	float3 cameraPosition;
@@ -31,14 +34,39 @@ cbuffer SceneConstants : register(b0)
 	float ambient;
 	float shadowBias;
 	float2 padding;
+	uint frameIndex;
+	uint maxBounces;
+	uint samplesPerFrame;
+	float environmentIntensity;
+	float environmentRotation;
+	float3 padding2;
 };
 struct Payload
 {
 	float3 color;
+	float3 position;
+	float3 normal;
+	float3 geometricNormal;
+	uint hit;
 };
+static const float pi = 3.14159265359f;
+
 uint localIndex(uint offset)
 {
 	return (meshletTriangles.Load(offset & ~3u) >> ((offset & 3u) * 8u)) & 255u;
+}
+float random(inout uint state)
+{
+	state = state * 747796405u + 2891336453u;
+	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+	word = (word >> 22u) ^ word;
+	return float(word >> 8u) * (1.0f / 16777216.0f);
+}
+float3 sampleEnvironment(float3 direction)
+{
+	float2 uv = float2(atan2(direction.z, direction.x) / (2.0f * pi) + 0.5f + environmentRotation / (2.0f * pi),
+		acos(clamp(direction.y, -1.0f, 1.0f)) / pi);
+	return environmentMap.SampleLevel(environmentSampler, uv, 0).rgb * environmentIntensity;
 }
 float3 displayColor(float3 radiance)
 {
@@ -46,18 +74,22 @@ float3 displayColor(float3 radiance)
 	mapped = mapped / (1.0f + mapped);
 	return select(mapped <= 0.0031308f, mapped * 12.92f, 1.055f * pow(mapped, 1.0f / 2.4f) - 0.055f);
 }
-
+float rayBias(float3 position)
+{
+	return max(shadowBias, 0.000001f * max(max(abs(position.x), abs(position.y)), abs(position.z)));
+}
+float3 offsetOrigin(float3 position, float3 geometricNormal)
+{
+	return position + geometricNormal * rayBias(position);
+}
 float visibility(float3 position, float3 geometricNormal)
 {
 	if (shadows < 0.5f)
 	{
 		return 1.0f;
 	}
-	// Geometric-normal offset avoids sending rays beneath smoothed surfaces.
-	// A relative term also keeps the offset representable far from the origin.
-	float bias = max(shadowBias, 0.000001f * max(max(abs(position.x), abs(position.y)), abs(position.z)));
 	RayDesc ray;
-	ray.Origin = position + geometricNormal * bias;
+	ray.Origin = offsetOrigin(position, geometricNormal);
 	ray.TMin = 0.0f;
 	ray.Direction = lightDirection;
 	ray.TMax = 100000.0f;
@@ -65,7 +97,7 @@ float visibility(float3 position, float3 geometricNormal)
 	{
 		float3 delta = lightPosition - ray.Origin;
 		float distance = length(delta);
-		if (distance <= bias)
+		if (distance <= rayBias(position))
 		{
 			return 1.0f;
 		}
@@ -74,9 +106,37 @@ float visibility(float3 position, float3 geometricNormal)
 	}
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
 	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
-	// All geometry is opaque triangles, so no candidate requires shader handling.
 	query.Proceed();
 	return query.CommittedStatus() == COMMITTED_NOTHING ? 1.0f : 0.0f;
+}
+float3 directLighting(Payload surface)
+{
+	float3 toLight = lightDirection;
+	float attenuation = 1.0f;
+	if (pointLight > 0.5f)
+	{
+		float3 delta = lightPosition - surface.position;
+		float distanceSquared = max(dot(delta, delta), 0.0001f);
+		toLight = delta * rsqrt(distanceSquared);
+		attenuation = rcp(distanceSquared);
+	}
+	float cosine = saturate(dot(surface.normal, toLight));
+	float visible = 0.0f;
+	if (cosine > 0.0f && dot(surface.geometricNormal, toLight) > 0.0f && lightStrength > 0.0f)
+	{
+		visible = visibility(surface.position, surface.geometricNormal);
+	}
+	float3 irradiance = ambient + lightColor * lightStrength * attenuation * cosine * visible;
+	return surface.color * (1.0f / pi) * irradiance;
+}
+float3 cosineHemisphere(float3 normal, inout uint state)
+{
+	float radius = sqrt(random(state));
+	float phi = 2.0f * pi * random(state);
+	float3 tangent = normalize(cross(abs(normal.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0), normal));
+	float3 bitangent = cross(normal, tangent);
+	return normalize(tangent * (radius * cos(phi)) + bitangent * (radius * sin(phi))
+		+ normal * sqrt(max(0.0f, 1.0f - radius * radius)));
 }
 [shader("raygeneration")]
 void RGSMain()
@@ -87,24 +147,64 @@ void RGSMain()
 		outputImage[pixel] = float4(backgroundColor, 1.0f);
 		return;
 	}
-	float2 dimensions = float2(DispatchRaysDimensions().xy);
-	float2 uv = float2((float(pixel.x) - viewportLeft + 0.5f) / max(dimensions.x - viewportLeft, 1.0f),
-		(float(pixel.y) + 0.5f) / dimensions.y);
-	float2 screen = uv * 2.0f - 1.0f;
-	RayDesc ray;
-	ray.Origin = cameraPosition;
-	ray.Direction = normalize(cameraForward + screen.x * aspectRatio * tanHalfFov * cameraRight - screen.y * tanHalfFov * cameraUp);
-	ray.TMin = 0.0001f;
-	ray.TMax = 100000.0f;
-	Payload payload;
-	payload.color = 0.0f;
-	TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
-	outputImage[pixel] = float4(payload.color, 1.0f);
+	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
+	state ^= (frameIndex + 1u) * 277803737u;
+	float3 frameRadiance = 0.0f;
+	for (uint sampleIndex = 0; sampleIndex < samplesPerFrame; ++sampleIndex)
+	{
+		float2 dimensions = float2(DispatchRaysDimensions().xy);
+		float2 jitter = float2(random(state), random(state));
+		float2 uv = float2((float(pixel.x) - viewportLeft + jitter.x) / max(dimensions.x - viewportLeft, 1.0f),
+			(float(pixel.y) + jitter.y) / dimensions.y);
+		float2 screen = uv * 2.0f - 1.0f;
+		RayDesc ray;
+		ray.Origin = cameraPosition;
+		ray.Direction = normalize(cameraForward + screen.x * aspectRatio * tanHalfFov * cameraRight - screen.y * tanHalfFov * cameraUp);
+		ray.TMin = 0.0001f;
+		ray.TMax = 100000.0f;
+		float3 throughput = 1.0f;
+		float3 radiance = 0.0f;
+		for (uint depth = 0; depth <= maxBounces; ++depth)
+		{
+			Payload payload;
+			payload.hit = 0;
+			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
+			if (payload.hit == 0)
+			{
+				radiance += throughput * payload.color;
+				break;
+			}
+			radiance += throughput * directLighting(payload);
+			if (depth == maxBounces)
+			{
+				break;
+			}
+			ray.Direction = cosineHemisphere(payload.normal, state);
+			if (dot(ray.Direction, payload.geometricNormal) <= 0.0f)
+			{
+				break;
+			}
+			// Lambert f*cos/pdf cancels to albedo under cosine-weighted sampling.
+			throughput *= payload.color;
+			ray.Origin = offsetOrigin(payload.position, payload.geometricNormal);
+			ray.TMin = 0.0f;
+		}
+		frameRadiance += radiance;
+	}
+	frameRadiance /= float(samplesPerFrame);
+	float3 average = frameRadiance;
+	if (frameIndex > 0)
+	{
+		average = lerp(accumulation[pixel].rgb, frameRadiance, 1.0f / (float(frameIndex) + 1.0f));
+	}
+	accumulation[pixel] = float4(average, 1.0f);
+	outputImage[pixel] = float4(displayColor(average), 1.0f);
 }
 [shader("miss")]
 void RMSMain(inout Payload payload)
 {
-	payload.color = backgroundColor * lerp(0.65f, 1.65f, saturate(WorldRayDirection().y * 0.5f + 0.5f));
+	payload.hit = 0;
+	payload.color = sampleEnvironment(WorldRayDirection());
 }
 [shader("closesthit")]
 void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes attributes)
@@ -139,24 +239,10 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 		hash = (hash >> 22u) ^ hash;
 		color = 0.2f + 0.8f * float3(hash & 255u, (hash >> 8u) & 255u, (hash >> 16u) & 255u) / 255.0f;
 	}
-	float3 position = a.position + attributes.barycentrics.x * (b.position - a.position)
+	payload.position = a.position + attributes.barycentrics.x * (b.position - a.position)
 		+ attributes.barycentrics.y * (c.position - a.position);
-	float3 toLight = lightDirection;
-	float attenuation = 1.0f;
-	if (pointLight > 0.5f)
-	{
-		float3 delta = lightPosition - position;
-		float distanceSquared = max(dot(delta, delta), 0.0001f);
-		toLight = delta * rsqrt(distanceSquared);
-		attenuation = rcp(distanceSquared);
-	}
-	float cosine = saturate(dot(normal, toLight));
-	float visible = 0.0f;
-	if (cosine > 0.0f && dot(geometricNormal, toLight) > 0.0f && lightStrength > 0.0f)
-	{
-		visible = visibility(position, geometricNormal);
-	}
-	// Lambert BRDF = albedo / pi. The adjustable ambient term is only a preview fill.
-	float3 irradiance = ambient + lightColor * lightStrength * attenuation * cosine * visible;
-	payload.color = displayColor(color * (1.0f / 3.14159265f) * irradiance);
+	payload.normal = normal;
+	payload.geometricNormal = geometricNormal;
+	payload.color = color;
+	payload.hit = 1;
 }
