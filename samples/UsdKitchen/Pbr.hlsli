@@ -1,3 +1,4 @@
+#include "GgxEnergy.hlsli"
 struct Material
 {
 	float3 baseColor;
@@ -19,6 +20,7 @@ struct Surface
 	float roughness;
 	float specular;
 	float occlusion;
+	bool singleScatterOnly;
 #ifdef PBR_COMPARE_NDF
 	bool useNdf; // Numerical regression tests only; production always uses VNDF.
 #endif
@@ -43,6 +45,12 @@ float specularProbability(Surface surface, float3 view)
 {
 	float energy = maxComponent(fresnelSchlick(materialF0(surface), dot(surface.normal, view)));
 	float diffuse = maxComponent(surface.baseColor) * (1.0f - surface.metallic) * (1.0f - energy);
+	if (!surface.singleScatterOnly && surface.roughness >= 0.001f)
+	{
+		float2 loss = ggxLoss(max(surface.roughness, 0.02f), dot(surface.normal, view));
+		diffuse += maxComponent(ggxMultipleFresnel(materialF0(surface), loss.y)) * loss.x;
+		energy *= 1.0f - loss.x;
+	}
 	if (energy <= 0.0f)
 	{
 		return 0.0f;
@@ -102,7 +110,18 @@ float3 evaluateBsdf(Surface surface, float3 view, float3 direction, out float pd
 	}
 #endif
 	pdf += pSpecular * specularPdf;
-	return diffuse + d * visibility * fresnel;
+	float3 multipleScattering = 0;
+	if (!surface.singleScatterOnly)
+	{
+		float2 lossV = ggxLoss(max(surface.roughness, 0.02f), noV);
+		float lossL = ggxLoss(max(surface.roughness, 0.02f), noL).x;
+		if (lossV.y > 0.000001f)
+		{
+			multipleScattering = ggxMultipleFresnel(materialF0(surface), lossV.y) * lossV.x * lossL / (pbrPi * lossV.y);
+		}
+	}
+	// The cosine branch samples both the diffuse and compensation lobes.
+	return diffuse + d * visibility * fresnel + multipleScattering;
 }
 float3 tangentToWorld(float3 normal, float3 local)
 {

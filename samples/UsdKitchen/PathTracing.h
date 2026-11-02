@@ -10,4 +10,5 @@ struct PathTracing
 	float mEnvironmentRotation = 0.0f;
 	bool mEnvironmentMis = true;
 	bool mEmissiveMis = true;
+	bool mMultipleScattering = true;
 };

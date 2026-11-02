@@ -1,6 +1,7 @@
 #include "SceneFile.h"
 #include "../samples/UsdKitchen/EnvironmentMap.h"
 #include "../samples/UsdKitchen/MeshLight.h"
+#include "../samples/UsdKitchen/GgxEnergyLut.h"
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -129,7 +130,7 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	{
 		throw std::runtime_error("WhiteFurnaceTests requires Shader Model 6.0.");
 	}
-	D3D12_ROOT_PARAMETER parameters[5]{};
+	D3D12_ROOT_PARAMETER parameters[6]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[0].Descriptor.ShaderRegister = 0;
 	parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
@@ -140,8 +141,10 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	parameters[3].Descriptor.ShaderRegister = 1;
 	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[4].Descriptor.ShaderRegister = 2;
+	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[5].Descriptor.ShaderRegister = 9;
 	D3D12_ROOT_SIGNATURE_DESC rootDesc{};
-	rootDesc.NumParameters = 5;
+	rootDesc.NumParameters = 6;
 	rootDesc.pParameters = parameters;
 	ComPtr<ID3DBlob> rootBlob, errors;
 	check(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootBlob, &errors), "Serialize furnace root signature");
@@ -196,6 +199,10 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	check(mesh->Map(0, &noRead, &mapped), "Map furnace mesh lights");
 	std::memcpy(mapped, meshLights.data(), meshLights.size() * sizeof(MeshLight));
 	mesh->Unmap(0, nullptr);
+	auto energy = buffer(device.Get(), sizeof(ggxEnergyLut), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
+	check(energy->Map(0, &noRead, &mapped), "Map GGX energy LUT");
+	std::memcpy(mapped, ggxEnergyLut.data(), sizeof(ggxEnergyLut));
+	energy->Unmap(0, nullptr);
 	const size_t bytes = tests.size() * sizeof(Result);
 	auto output = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto readback = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -210,6 +217,7 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	commands->SetComputeRootShaderResourceView(0, input->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(3, environment->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(4, mesh->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(5, energy->GetGPUVirtualAddress());
 	commands->SetComputeRootUnorderedAccessView(1, output->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstant(2, samplesPerThread, 0);
 	commands->Dispatch(static_cast<UINT>(tests.size()), 1, 1);
@@ -256,12 +264,12 @@ std::vector<Test> testCases()
 	std::vector<Test> tests;
 	for (float metallic : {0.0f, 0.5f, 1.0f})
 	{
-		for (float roughness : {0.0f, 0.02f, 0.1f, 0.3f, 0.6f, 1.0f})
+		for (float roughness : {0.0f, 0.02f, 0.1f, 0.17f, 0.3f, 0.45f, 0.6f, 0.83f, 1.0f})
 		{
 			for (float noV : {1.0f, 0.5f, 0.1f, 0.02f})
 			{
 				Test test{{{1,1,1}, metallic, roughness, 0.5f, noV, roughness == 0 || roughness >= 0.6f}, "white", {}};
-				if (metallic == 1 && roughness == 0)
+				if (metallic == 1)
 				{
 					test.mExpected = {1,1,1};
 				}
@@ -276,6 +284,28 @@ std::vector<Test> testCases()
 		tests.push_back({{{0,0,0}, 0, 0.5f, 0, noV, 1}, "absorber", std::array<float,3>{0,0,0}});
 		tests.push_back({{{1,1,1}, 0, 0.3f, 1, noV, 0}, "high-specular", {}});
 	}
+	for (float metallic : {0.0f, 0.5f, 1.0f})
+	{
+		for (float roughness : {0.02f, 0.3f, 0.6f, 1.0f})
+		{
+			for (float noV : {1.0f, 0.5f, 0.1f, 0.02f})
+			{
+				tests.push_back({{{0.95f,0.5f,0.1f}, metallic, roughness, 1, noV, roughness >= 0.6f}, "colored", {}});
+			}
+		}
+	}
+	const size_t multipleCount = tests.size();
+	for (size_t index = 0; index < multipleCount; ++index)
+	{
+		auto single = tests[index];
+		single.mData.mFlags |= 32u;
+		single.mName = "single-" + single.mName;
+		if (single.mData.mMetallic == 1 && single.mData.mRoughness > 0)
+		{
+			single.mExpected.reset();
+		}
+		tests.push_back(single);
+	}
 	const size_t environmentCount = tests.size();
 	// Exact Lambert form factor for a centered 2x2 rectangle at distance 2.
 	const float lambertFactor = static_cast<float>(4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25)));
@@ -284,7 +314,7 @@ std::vector<Test> testCases()
 		auto rectangle = tests[index];
 		rectangle.mData.mFlags |= 4u;
 		rectangle.mName = "rectangle-" + rectangle.mName;
-		if (rectangle.mName == "rectangle-lambert-white" || rectangle.mName == "rectangle-lambert-color")
+		if (rectangle.mData.mSpecular == 0 && rectangle.mExpected)
 		{
 			for (float& channel : *rectangle.mExpected)
 			{
@@ -295,6 +325,10 @@ std::vector<Test> testCases()
 		{
 			const float value = rectangle.mData.mNoV == 1 ? 1.0f : 0.0f;
 			rectangle.mExpected = {value,value,value};
+		}
+		else if (rectangle.mData.mMetallic == 1 && rectangle.mData.mRoughness > 0)
+		{
+			rectangle.mExpected.reset();
 		}
 		tests.push_back(rectangle);
 	}
@@ -368,6 +402,8 @@ void writeFixtures(const std::filesystem::path& directory)
 	plane.mMaterials[0].mMetallic = 1;
 	plane.mMaterials[0].mRoughness = 0;
 	writeSceneFile(directory / L"mirror.ptscene", plane);
+	plane.mMaterials[0].mRoughness = 1;
+	writeSceneFile(directory / L"rough-metal.ptscene", plane);
 	plane.mMaterials[0].mMetallic = 0;
 	plane.mMaterials[0].mSpecular = 0;
 	plane.mMaterials[0].mRoughness = 0.5f;
@@ -417,7 +453,9 @@ int wmain(int count, wchar_t** arguments)
 					&& mean >= -0.0001 && mean <= 1.002 + 6 * error;
 				if (test.mExpected)
 				{
-					pass &= std::abs(mean - (*test.mExpected)[axis]) <= 0.0005 + ((test.mData.mFlags & 6u) ? 6 * error : 0);
+					const bool roughWhiteMetal = test.mData.mMetallic == 1 && test.mData.mRoughness >= 0.001f;
+					pass &= std::abs(mean - (*test.mExpected)[axis]) <= (roughWhiteMetal ? 0.002 : 0.0005)
+						+ ((roughWhiteMetal || (test.mData.mFlags & 6u)) ? 6 * error : 0);
 				}
 				if (test.mData.mFlags & 1u)
 				{
@@ -438,7 +476,7 @@ int wmain(int count, wchar_t** arguments)
 					pass &= std::abs(mean - vndf.mMean[axis]) <= 0.005 + 6 * combinedError;
 					// A white rough metal at grazing incidence is the key VNDF case.
 					// Compare BSDF-only samples under uniform illumination, without NEE noise.
-					if (test.mData.mFlags == 17u && test.mData.mMetallic == 1 && test.mData.mRoughness == 0.6f && test.mData.mNoV == 0.02f)
+					if (test.mName == "ndf-white" && test.mData.mMetallic == 1 && test.mData.mRoughness == 0.6f && test.mData.mNoV == 0.02f)
 					{
 						pass &= vndf.mVariance[axis] < 0.1f * result.mVariance[axis]
 							&& vndf.mRejectionRate < 0.1f * result.mRejectionRate;
