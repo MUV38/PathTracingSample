@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals"><ProjectGuid>{A308CE85-3F87-42D3-931A-C7875447F36D}</ProjectGuid></PropertyGroup>
+	<Import Project="..\build_support\Cpp.props" />
+	<PropertyGroup><DxcExecutable>$([System.String]::Copy('$(WindowsSDK_ExecutablePath_x64)').Split(';')[0])\dxc.exe</DxcExecutable></PropertyGroup>
+	<ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+	<ItemGroup>
+		<ClCompile Include="WhiteFurnaceTests.cpp" />
+		<ClCompile Include="..\common\SceneFile.cpp" />
+		<ClInclude Include="..\samples\UsdKitchen\Pbr.hlsli" />
+		<CustomBuild Include="WhiteFurnace.hlsl">
+			<Command>"$(DxcExecutable)" -T cs_6_0 -E CSMain -HV 2021 -WX -Fo "$(OutDir)WhiteFurnace.dxil" "%(FullPath)"</Command>
+			<Outputs>$(OutDir)WhiteFurnace.dxil</Outputs>
+			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;%(AdditionalInputs)</AdditionalInputs>
+		</CustomBuild>
+	</ItemGroup>
+	<Import Project="..\build_support\Cpp.targets" />
+</Project>

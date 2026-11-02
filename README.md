@@ -14,6 +14,7 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 | SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
 | EnvironmentMapTests | Radiance HDRの復号・向き・不正入力のテスト | GPU / USD SDK不要 |
+| WhiteFurnaceTests | 実描画と共通のBRDFを白色環境で積分し、エネルギー増加・不正値を検出 | DirectX 12 / SM6.0、WARP可 |
 
 DXRキューブは1個のBLASとTLAS、レイトレーシングPSO、シェーダーテーブルを構築し、
 DispatchRays()からRay Generation / Miss / Closest Hitシェーダーを実行します。
@@ -25,6 +26,9 @@ UsdKitchenはmeshletを読み込み、Metallic / Roughness方式のPBR、GGX鏡�
 Miss時はIBLを参照します。自作の空マップを既定で使い、Radiance HDRの読み込みにも対応しています。
 ImGuiで光源、IBL、バウンス数、サンプル数を調整でき、静止中はHDRのサンプルを蓄積します。
 詳しくは [UsdKitchenの照明設定](samples/UsdKitchen/README.md#間接照明とibl) を参照してください。
+ホワイトファーナステストはビルド後に `tests/RunWhiteFurnace.ps1 -Configuration Debug`（またはRelease）で実行します。
+BRDFの数値検証に加え、UsdKitchenで白色環境の画像を撮影・判定します。画像検証にはDXR Tier 1.1が必要です。
+判定内容と出力ファイルは [テスト手順](tests/WhiteFurnace.md) を参照してください。
 
 ## ビルドと実行
 

@@ -105,6 +105,8 @@ Roughnessは二乗してGGXのalphaへ変換し、非ゼロの粗さは数値安
 直接光にも同じBRDFを使用します。完全鏡は有限幅の直接光ローブを持たず、次のレイが映したIBL・物体・発光面を反射します。
 拡散とGGXの混合サンプリングで経路を選び、`BRDF × cos / 混合PDF` で重みを更新します。完全鏡はFresnelとローブ選択確率で重みを更新します。
 GGXで面の下に出たサンプルは捨て、再抽選しません。多重散乱のエネルギー補償は未実装です。
+拡散項には視線側と入射光側のFresnel透過率を掛け、斜め視線で鏡面項と拡散項の合計が過剰になることを抑えます。
+白色環境でのエネルギー増加とサンプリングの整合性は [ホワイトファーナステスト](../../tests/WhiteFurnace.md) で検証できます。
 
 ```powershell
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --metallic 1 --roughness 0 --bounces 8 --samples 256 --screenshot build/checks/mirror.png
