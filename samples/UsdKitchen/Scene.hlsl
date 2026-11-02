@@ -3,6 +3,7 @@
 #include "RectangleLight.hlsli"
 #include "MeshLight.hlsli"
 #include "RussianRoulette.hlsli"
+#include "RestirDI.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -23,6 +24,15 @@ StructuredBuffer<MeshLight> meshLights : register(t8);
 SamplerState environmentSampler : register(s0);
 RWTexture2D<float4> outputImage : register(u0);
 RWTexture2D<float4> accumulation : register(u1);
+RWStructuredBuffer<PrimarySurface> primarySurfaces : register(u2);
+RWStructuredBuffer<PrimarySurface> previousSurfaces : register(u3);
+RWStructuredBuffer<LightReservoir> initialReservoirs : register(u4);
+RWStructuredBuffer<LightReservoir> currentReservoirs : register(u5);
+RWStructuredBuffer<LightReservoir> previousReservoirs : register(u6);
+cbuffer RestirPass : register(b1)
+{
+	uint restirPass;
+};
 cbuffer SceneConstants : register(b0)
 {
 	float3 cameraPosition;
@@ -56,6 +66,15 @@ cbuffer SceneConstants : register(b0)
 	uint emissiveMis;
 	uint multipleScattering;
 	uint russianRoulette;
+	uint restirMode;
+	uint restirDebug;
+	float2 restirPadding;
+	uint historyValid;
+	uint restirFrame;
+	float2 historyPadding;
+	row_major float4x4 previousViewProjection;
+	float previousViewportLeft;
+	float3 previousCameraPadding;
 };
 struct Payload
 {
@@ -271,17 +290,23 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 	}
 	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
 }
+#include "RestirPasses.hlsli"
 [shader("raygeneration")]
 void RGSMain()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
+	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
+	state ^= (frameIndex + 1u) * 277803737u;
+	if (restirPass < 2)
+	{
+		prepareRestir(pixel, state);
+		return;
+	}
 	if (float(pixel.x) < viewportLeft)
 	{
 		outputImage[pixel] = float4(backgroundColor, 1.0f);
 		return;
 	}
-	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
-	state ^= (frameIndex + 1u) * 277803737u;
 	float3 frameRadiance = 0.0f;
 	for (uint sampleIndex = 0; sampleIndex < samplesPerFrame; ++sampleIndex)
 	{
@@ -300,6 +325,7 @@ void RGSMain()
 		float missWeight = 1.0f;
 		float previousBsdfPdf = 0.0f;
 		bool previousDelta = true;
+		bool previousRestir = false;
 		float3 previousPosition = cameraPosition;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
@@ -348,8 +374,15 @@ void RGSMain()
 			float emissionWeight = 1.0f;
 			if (depth > 0 && !previousDelta && emissiveMis != 0 && meshLightCount > 0)
 			{
-				float pdf = meshLightPdf(meshLights[payload.triangleIndex], previousPosition, payload.position);
-				emissionWeight = powerHeuristic(previousBsdfPdf, pdf);
+				if (previousRestir && meshLights[payload.triangleIndex].areaDensity > 0)
+				{
+					emissionWeight = 0;
+				}
+				else
+				{
+					float pdf = meshLightPdf(meshLights[payload.triangleIndex], previousPosition, payload.position);
+					emissionWeight = powerHeuristic(previousBsdfPdf, pdf);
+				}
 			}
 			radiance += throughput * (material.emissiveColor * material.emissiveStrength * emissionWeight + directLighting(surface, view));
 			if (depth == maxBounces)
@@ -366,10 +399,24 @@ void RGSMain()
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * rectangleLighting(surface, view, lightU);
 			}
+			bool useRestir = false;
+			if (depth == 0 && restirMode > 0 && meshletColors < 0.5f)
+			{
+				PrimarySurface primary = primarySurfaces[pixel.x + pixel.y * DispatchRaysDimensions().x];
+				useRestir = primary.valid != 0 && primary.triangleIndex == payload.triangleIndex
+					&& length(primary.position - surface.position) < max(0.01f, primary.depth * 0.02f);
+			}
 			if (emissiveMis != 0 && meshLightCount > 0)
 			{
-				float3 lightU = float3(random(state), random(state), random(state));
-				radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
+				if (useRestir)
+				{
+					radiance += throughput * restirLighting(surface, view, pixel);
+				}
+				else
+				{
+					float3 lightU = float3(random(state), random(state), random(state));
+					radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
+				}
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
@@ -399,6 +446,7 @@ void RGSMain()
 			}
 			previousPosition = surface.position;
 			previousDelta = delta;
+			previousRestir = useRestir;
 			previousBsdfPdf = 0.0f;
 			if (!delta)
 			{
@@ -418,6 +466,32 @@ void RGSMain()
 	}
 	accumulation[pixel] = float4(average, 1.0f);
 	outputImage[pixel] = float4(displayColor(average), 1.0f);
+	if (restirDebug > 0)
+	{
+		uint address = pixel.x + pixel.y * DispatchRaysDimensions().x;
+		PrimarySurface primary = primarySurfaces[address];
+		float3 debugColor = 0;
+		if (primary.valid != 0)
+		{
+			if (restirDebug == 1)
+			{
+				debugColor = primary.normal * 0.5f + 0.5f;
+			}
+			else if (restirDebug == 2)
+			{
+				debugColor = (primary.depth / (1.0f + primary.depth)).xxx;
+			}
+			else if (restirDebug == 3)
+			{
+				debugColor = float3(saturate(0.5f + primary.motion * 0.05f), 0.5f);
+			}
+			else
+			{
+				debugColor = float3(currentReservoirs[address].count / 200.0f, historyValid != 0 && restirMode >= 2 ? 1.0f : 0.0f, 0);
+			}
+		}
+		outputImage[pixel] = float4(debugColor, 1);
+	}
 }
 [shader("miss")]
 void RMSMain(inout Payload payload)
