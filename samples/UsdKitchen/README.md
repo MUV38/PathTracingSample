@@ -35,7 +35,21 @@ GeometryIndex()を使用するため、DXR Tier 1.1 / Shader Model 6.5が必要�
 
 相対パスはカレントディレクトリ基準です。空白を含むパスは引用符で囲んでください。
 Kitchen Setは同梱・自動取得しません。公式の利用条件に従い、入手データおよび変換したデータもコミットしないでください。
-`assets/local/` と `build/` はGit管理外です。Kitchen Set実データでの変換・表示確認は未実施です。
+`assets/local/`、`assets/Source/Kitchen_set/`、`build/` はGit管理外です。
+利用者が配置した `assets/Source/Kitchen_set/Kitchen_set.usd` と `Kitchen_set_instanced.usd` で、Debug / Releaseの変換・描画を確認しました。
+2022-07-21版（同梱VERSION.txt）の通常版とインスタンス版は両構成で同じバイナリになり、1,788メッシュ出現、536,918三角形、25,980 meshlets、1,370,251頂点です。
+原本は移動せず、次のコマンドで変換結果・ログ・128サンプルの描画画像を `build/checks/kitchen-<構成>/` に保存できます。
+
+```powershell
+.\tests\RunKitchenSet.ps1 -Configuration Debug
+.\tests\RunKitchenSet.ps1 -Configuration Release
+```
+
+このスクリプトは、メインソリューションと独立したUsdConverterを同じ構成でビルドしてから使用してください。
+原本の位置は `-SourceDirectory`、出力先は `-OutputDirectory` で変更できます。保存PNGは開いて表示内容も確認してください。
+`--usd assets/Source/Kitchen_set/Kitchen_set_instanced.usd` を指定してアプリから変換・読み込みする経路も、Debug / Releaseで確認済みです。
+Subdivisionは細分化せず制御ケージとして表示します。今回のデータは定数PBRマテリアルのバインドがなく、displayColorと既定マテリアルで描画されます。
+初期の全体表示には天井も含まれます。室内の確認には既存のフリーカメラを使用できます。
 
 ## アプリから変換する
 

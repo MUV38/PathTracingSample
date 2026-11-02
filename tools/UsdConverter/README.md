@@ -75,6 +75,11 @@ USDの `useSpecularWorkflow=1` は未対応としてエラーにします。テ�
 
 ## 検証
 
+利用者が配置したPixar Kitchen Set（同梱VERSION.txtの2022-07-21版）は、通常版とUSDネイティブインスタンス版の両方をDebug / Releaseで変換・表示確認しています。
+原本はGit管理外の `assets/Source/Kitchen_set/`、検証結果は `build/checks/kitchen-<構成>/` です。
+`tests/RunKitchenSet.ps1 -Configuration <構成>` は変換終了コード、描画終了コード、通常版とインスタンス版の出力SHA256一致を検査し、統計・ログ・PNGを保存します。
+保存PNGを開いて表示内容も確認してください。Subdivisionは既存仕様どおり制御ケージの出力です。
+
 メインソリューションのSceneFileTestsはUSD SDK不要です。自作の凹多角形を変換した結果も追加引数で検証できます。
 階層変換、cmからmへの変換、Z-upからY-upへの変換、法線、indexed displayColor、三角形の面積を確認します。
 共有頂点を持つグリッドの分割、三角形・向き・法線・色・マテリアル番号の保存、meshlet上限・インデックス不正の拒否、旧形式の拒否もテストします。
