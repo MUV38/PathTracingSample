@@ -24,6 +24,8 @@ DxrCubeは単発の一次レイによるDXR入門サンプルです。多重反�
 
 UsdKitchenはmeshletを読み込み、Metallic / Roughness方式のPBR、GGX鏡面反射、ハードシャドウ、複数バウンスの間接照明を描画します。
 Miss時はIBLを参照します。自作の空マップを既定で使い、Radiance HDRの読み込みにも対応しています。
+IBLは輝度に応じた重点サンプリングとNEEを行い、BRDFサンプリングとMISで統合します。
+ImGuiの `IBL NEE / MIS` または比較用の `--no-ibl-mis` で従来方式へ切り替えられます。
 ImGuiで光源、IBL、バウンス数、サンプル数を調整でき、静止中はHDRのサンプルを蓄積します。
 詳しくは [UsdKitchenの照明設定](samples/UsdKitchen/README.md#間接照明とibl) を参照してください。
 ホワイトファーナステストはビルド後に `tests/RunWhiteFurnace.ps1 -Configuration Debug`（またはRelease）で実行します。

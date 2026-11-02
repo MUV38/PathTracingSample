@@ -44,6 +44,7 @@ private:
 	ComPtr<ID3D12Resource> mOutput;
 	ComPtr<ID3D12Resource> mAccumulation;
 	ComPtr<ID3D12Resource> mEnvironment;
+	ComPtr<ID3D12Resource> mEnvironmentDistribution;
 	ComPtr<ID3D12DescriptorHeap> mSrvUavHeap;
 	UINT mWidth = 0;
 	UINT mHeight = 0;

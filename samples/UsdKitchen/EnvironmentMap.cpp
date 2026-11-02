@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <numbers>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -186,6 +187,65 @@ EnvironmentMap readRadianceEnvironment(const std::filesystem::path& path)
 			}
 			pixel[3] = 1.0f;
 		}
+	}
+	return result;
+}
+
+std::vector<std::array<float, 2>> createEnvironmentDistribution(const EnvironmentMap& environment)
+{
+	if (!environment.mWidth || !environment.mHeight || environment.mWidth > 16384 || environment.mHeight > 16384
+		|| static_cast<uint64_t>(environment.mWidth) * environment.mHeight > 16777216
+		|| environment.mPixels.size() != static_cast<size_t>(environment.mWidth) * environment.mHeight)
+	{
+		throw std::runtime_error("Invalid environment distribution dimensions.");
+	}
+	constexpr double pi = std::numbers::pi;
+	const uint32_t width = environment.mWidth, height = environment.mHeight;
+	std::vector<double> rows(height);
+	double total = 0;
+	for (uint32_t y = 0; y < height; ++y)
+	{
+		const double area = (2 * pi / width) * (std::cos(pi * y / height) - std::cos(pi * (y + 1) / height));
+		for (uint32_t x = 0; x < width; ++x)
+		{
+			const auto& pixel = environment.mPixels[static_cast<size_t>(y) * width + x];
+			for (float value : pixel)
+			{
+				if (!std::isfinite(value) || value < 0 || value > 1e20f)
+				{
+					throw std::runtime_error("Invalid environment distribution radiance.");
+				}
+			}
+			rows[y] += (0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2]) * area;
+		}
+		total += rows[y];
+	}
+	std::vector<std::array<float, 2>> result(height + static_cast<size_t>(width) * height);
+	double rowCdf = 0;
+	float previousRow = 0;
+	for (uint32_t y = 0; y < height; ++y)
+	{
+		const double area = (2 * pi / width) * (std::cos(pi * y / height) - std::cos(pi * (y + 1) / height));
+		const double uniformRow = area * width / (4 * pi);
+		const double rowMass = total > 0 ? 0.95 * rows[y] / total + 0.05 * uniformRow : uniformRow;
+		rowCdf += rowMass;
+		const float roundedRow = y + 1 == height ? 1.0f : static_cast<float>(rowCdf);
+		result[y] = {roundedRow, 0};
+		double columnCdf = 0;
+		float previousColumn = 0;
+		for (uint32_t x = 0; x < width; ++x)
+		{
+			const auto& pixel = environment.mPixels[static_cast<size_t>(y) * width + x];
+			const double luminance = 0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2];
+			const double mass = total > 0 ? 0.95 * luminance * area / total + 0.05 * area / (4 * pi) : area / (4 * pi);
+			columnCdf += mass / rowMass;
+			const float roundedColumn = x + 1 == width ? 1.0f : static_cast<float>(columnCdf);
+			// Match the actual float CDF, including bins rounded to zero mass.
+			const float density = static_cast<float>((roundedRow - previousRow) * (roundedColumn - previousColumn) / area);
+			result[height + static_cast<size_t>(y) * width + x] = {roundedColumn, density};
+			previousColumn = roundedColumn;
+		}
+		previousRow = roundedRow;
 	}
 	return result;
 }

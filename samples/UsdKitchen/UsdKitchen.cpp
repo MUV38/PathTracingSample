@@ -150,6 +150,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			}
 			continue;
 		}
+		if (flag == L"--no-ibl-mis")
+		{
+			mTracing.mEnvironmentMis = false;
+			continue;
+		}
 		if (flag == L"--ibl-intensity" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -195,7 +200,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -541,6 +546,7 @@ void UsdKitchen::drawGui()
 		mTracing.mSamplesPerFrame = static_cast<uint32_t>(std::clamp(samples, 1, 16));
 		ImGui::SliderFloat("IBL intensity", &mTracing.mEnvironmentIntensity, 0.0f, 100.0f, "%.3f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderFloat("IBL rotation", &mTracing.mEnvironmentRotation, -180.0f, 180.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::Checkbox("IBL NEE / MIS", &mTracing.mEnvironmentMis);
 		ImGui::TextWrapped("IBL: %s", mEnvironmentName.c_str());
 		try
 		{
