@@ -1,4 +1,5 @@
 #include "SceneFile.h"
+#include "../samples/UsdKitchen/EnvironmentMap.h"
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -127,15 +128,17 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	{
 		throw std::runtime_error("WhiteFurnaceTests requires Shader Model 6.0.");
 	}
-	D3D12_ROOT_PARAMETER parameters[3]{};
+	D3D12_ROOT_PARAMETER parameters[4]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[0].Descriptor.ShaderRegister = 0;
 	parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
 	parameters[1].Descriptor.ShaderRegister = 0;
 	parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[2].Constants.Num32BitValues = 1;
+	parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[3].Descriptor.ShaderRegister = 1;
 	D3D12_ROOT_SIGNATURE_DESC rootDesc{};
-	rootDesc.NumParameters = 3;
+	rootDesc.NumParameters = 4;
 	rootDesc.pParameters = parameters;
 	ComPtr<ID3DBlob> rootBlob, errors;
 	check(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootBlob, &errors), "Serialize furnace root signature");
@@ -168,6 +171,16 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	check(input->Map(0, &noRead, &mapped), "Map furnace cases");
 	std::memcpy(mapped, cases.data(), cases.size() * sizeof(CaseData));
 	input->Unmap(0, nullptr);
+	// A deliberately nonuniform proposal over a unit-white target tests MIS
+	// normalization, 2D CDF inversion, rotation, and PDF agreement together.
+	EnvironmentMap proposal{16, 8, std::vector<std::array<float,4>>(128, {1,1,1,1})};
+	proposal.mPixels[37] = {1000,1000,1000,1};
+	const auto distribution = createEnvironmentDistribution(proposal);
+	const size_t distributionBytes = distribution.size() * sizeof(distribution[0]);
+	auto environment = buffer(device.Get(), distributionBytes, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
+	check(environment->Map(0, &noRead, &mapped), "Map furnace environment");
+	std::memcpy(mapped, distribution.data(), distributionBytes);
+	environment->Unmap(0, nullptr);
 	const size_t bytes = tests.size() * sizeof(Result);
 	auto output = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto readback = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -180,6 +193,7 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), pipeline.Get(), IID_PPV_ARGS(&commands)), "Create furnace commands");
 	commands->SetComputeRootSignature(root.Get());
 	commands->SetComputeRootShaderResourceView(0, input->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(3, environment->GetGPUVirtualAddress());
 	commands->SetComputeRootUnorderedAccessView(1, output->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstant(2, samplesPerThread, 0);
 	commands->Dispatch(static_cast<UINT>(tests.size()), 1, 1);
@@ -246,6 +260,14 @@ std::vector<Test> testCases()
 		tests.push_back({{{0,0,0}, 0, 0.5f, 0, noV, 1}, "absorber", std::array<float,3>{0,0,0}});
 		tests.push_back({{{1,1,1}, 0, 0.3f, 1, noV, 0}, "high-specular", {}});
 	}
+	const size_t count = tests.size();
+	for (size_t index = 0; index < count; ++index)
+	{
+		auto mis = tests[index];
+		mis.mData.mReferenceEnabled |= 2u;
+		mis.mName = "mis-" + mis.mName;
+		tests.push_back(mis);
+	}
 	return tests;
 }
 void writeFixtures(const std::filesystem::path& directory)
@@ -307,12 +329,19 @@ int wmain(int count, wchar_t** arguments)
 					&& mean >= -0.0001 && mean <= 1.002 + 6 * error;
 				if (test.mExpected)
 				{
-					pass &= std::abs(mean - (*test.mExpected)[axis]) <= 0.0005;
+					pass &= std::abs(mean - (*test.mExpected)[axis]) <= 0.0005 + ((test.mData.mReferenceEnabled & 2u) ? 6 * error : 0);
 				}
-				if (test.mData.mReferenceEnabled)
+				if (test.mData.mReferenceEnabled & 1u)
 				{
 					pass &= std::isfinite(result.mReference[axis]) && std::isfinite(referenceError)
 						&& std::abs(mean - result.mReference[axis]) <= 0.005 + 6 * std::hypot(error, referenceError);
+				}
+				if (test.mData.mReferenceEnabled & 2u)
+				{
+					// MIS cases follow the corresponding BSDF-only cases in the same order.
+					const auto& baseline = results[index - tests.size() / 2];
+					const double combinedError = std::sqrt((result.mVariance[axis] + baseline.mVariance[axis]) / sampleCount);
+					pass &= std::abs(mean - baseline.mMean[axis]) <= 0.005 + 6 * combinedError;
 				}
 				csv << test.mName << ',' << test.mData.mMetallic << ',' << test.mData.mRoughness << ',' << test.mData.mSpecular << ',' << test.mData.mNoV << ','
 					<< axis << ',' << mean << ',' << error << ',' << result.mReference[axis] << ',' << referenceError << ',' << result.mMaxWeight << ',' << result.mInvalid << ',' << pass << '\n';

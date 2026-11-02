@@ -7,11 +7,13 @@
 	<ItemGroup>
 		<ClCompile Include="WhiteFurnaceTests.cpp" />
 		<ClCompile Include="..\common\SceneFile.cpp" />
+		<ClCompile Include="..\samples\UsdKitchen\EnvironmentMap.cpp" />
 		<ClInclude Include="..\samples\UsdKitchen\Pbr.hlsli" />
+		<ClInclude Include="..\samples\UsdKitchen\EnvironmentSampling.hlsli" />
 		<CustomBuild Include="WhiteFurnace.hlsl">
 			<Command>"$(DxcExecutable)" -T cs_6_0 -E CSMain -HV 2021 -WX -Fo "$(OutDir)WhiteFurnace.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)WhiteFurnace.dxil</Outputs>
-			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;$(ProjectDir)..\samples\UsdKitchen\EnvironmentSampling.hlsli;%(AdditionalInputs)</AdditionalInputs>
 		</CustomBuild>
 	</ItemGroup>
 	<Import Project="..\build_support\Cpp.targets" />

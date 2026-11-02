@@ -84,7 +84,8 @@ struct SceneConstants
 	uint32_t mSamplesPerFrame = 1;
 	float mEnvironmentIntensity = 1.0f;
 	float mEnvironmentRotation = 0.0f;
-	std::array<float, 3> mPadding2{};
+	uint32_t mEnvironmentMis = 1;
+	std::array<float, 2> mPadding2{};
 };
 static_assert(sizeof(SceneConstants) == 44 * sizeof(float));
 }
@@ -266,22 +267,11 @@ void MeshRaytracer::updateMaterials(Renderer& renderer, const std::vector<SceneM
 
 void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& environment)
 {
-	if (!environment.mWidth || !environment.mHeight || environment.mWidth > 16384 || environment.mHeight > 16384
-		|| static_cast<uint64_t>(environment.mWidth) * environment.mHeight > 16777216
-		|| environment.mPixels.size() != static_cast<size_t>(environment.mWidth) * environment.mHeight)
-	{
-		throw std::runtime_error("Invalid environment texture dimensions.");
-	}
-	for (const auto& pixel : environment.mPixels)
-	{
-		for (float value : pixel)
-		{
-			if (!std::isfinite(value) || value < 0 || value > 1e20f)
-			{
-				throw std::runtime_error("Environment contains invalid or excessively large radiance.");
-			}
-		}
-	}
+	const auto distribution = createEnvironmentDistribution(environment);
+	const size_t distributionBytes = distribution.size() * sizeof(distribution[0]);
+	auto distributionUpload = uploadBuffer(mDevice.Get(), distribution.data(), distributionBytes);
+	auto distributionBuffer = createBuffer(mDevice.Get(), distributionBytes, D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
 	D3D12_HEAP_PROPERTIES heap{};
 	heap.Type = D3D12_HEAP_TYPE_DEFAULT;
 	D3D12_RESOURCE_DESC description{};
@@ -317,9 +307,12 @@ void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& en
 	destination.pResource = texture.Get();
 	destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
 	commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+	commands->CopyBufferRegion(distributionBuffer.Get(), 0, distributionUpload.Get(), 0, distributionBytes);
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition = {texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = distributionBuffer.Get();
 	commands->ResourceBarrier(1, &barrier);
 	check(commands->Close(), "Close IBL upload");
 	ID3D12CommandList* lists[] = {commands.Get()};
@@ -334,6 +327,7 @@ void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& en
 	handle.ptr += 2 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	mDevice->CreateShaderResourceView(texture.Get(), &view, handle);
 	mEnvironment = std::move(texture);
+	mEnvironmentDistribution = std::move(distributionBuffer);
 	resetAccumulation();
 }
 
@@ -346,7 +340,7 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[9]{};
+	D3D12_ROOT_PARAMETER parameters[10]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -368,6 +362,8 @@ void MeshRaytracer::createPipeline()
 	parameters[7].DescriptorTable.pDescriptorRanges = &environmentRange;
 	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[8].Descriptor.ShaderRegister = 6;
+	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[9].Descriptor.ShaderRegister = 7;
 	D3D12_STATIC_SAMPLER_DESC sampler{};
 	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -520,6 +516,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mSamplesPerFrame = tracing.mSamplesPerFrame;
 	constants.mEnvironmentIntensity = tracing.mEnvironmentIntensity;
 	constants.mEnvironmentRotation = DirectX::XMConvertToRadians(tracing.mEnvironmentRotation);
+	constants.mEnvironmentMis = tracing.mEnvironmentMis ? 1u : 0u;
 	// Compare all integrator inputs except the frame index, which is still zero here.
 	if (mResetAccumulation || mPreviousConstants.size() != sizeof(constants)
 		|| std::memcmp(mPreviousConstants.data(), &constants, sizeof(constants)) != 0 || mAccumulatedFrames == UINT32_MAX)
@@ -546,6 +543,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(5, mMeshlets->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstants(3, sizeof(constants) / sizeof(UINT), &constants, 0);
 	commands->SetPipelineState1(mPipeline.Get());
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;

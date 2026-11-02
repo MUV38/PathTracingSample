@@ -127,6 +127,7 @@ GGXで面の下に出たサンプルは捨て、再抽選しません。多重�
 - Path bounces: 拡散・鏡面を合わせた反射回数（0～8、既定3）。0では物体は直接照明・発光のみとなり、背景のIBL表示は維持します。
 - Samples per frame: 1フレームあたりのサンプル数（1～16、既定1）。カメラレイの位置もジッターします。
 - IBL intensity / rotation: 環境マップの強度（0～100、既定1）と水平方向の回転。
+- IBL NEE / MIS: 既定で有効。IBLの重点サンプリングと遮蔽レイによる直接評価を、BRDFサンプリングとMISで統合します。切り替えると蓄積をリセットします。
 - Open IBL (.hdr): 緯度経度形式のRadiance HDRを選択します。Preview skyで自作の空マップに戻せます。
 - Reset accumulation: 蓄積をやり直します。カメラ、光源、IBL、露出、バウンス数、サンプル数、描画領域、モデルが変わった場合も自動でリセットします。
 
@@ -137,20 +138,30 @@ GGXで面の下に出たサンプルは捨て、再抽選しません。多重�
 FORMAT・解像度以外のHDRメタデータは適用しません。入手したHDRは `assets/local/` などGit管理外の場所に置いてください。
 
 GPU上のRGBA32Fテクスチャに線形HDRの平均を蓄積し、表示時にトーンマッピングします。動かしている間は蓄積がリセットされるため、静止するとノイズが減ります。
-固定のバウンス上限によるパストレーシングです。IBL・発光面の直接サンプリング、MIS、デノイズ、Russian roulette、透過反射は未実装です。
+IBLロード時に線形輝度と画素の立体角から行・列のCDFを作り、GPUのバッファへ配置します。
+95%の輝度分布に5%の一様球分布を混ぜ、補間で明るくなる隣接画素にも確率を与えます。全黒マップは一様球分布へフォールバックします。
+選んだ画素の内部では方位角とcosθを一様にサンプリングし、PDFを立体角あたりで評価します。CDFのfloat丸めを含め、逆変換とPDFの確率を一致させます。
+各反射でIBLを1サンプル評価し、既存のBRDFサンプルとpower heuristic（指数2）で重み付けします。
+反射レイがIBLへMissした場合だけMISの重みを掛け、背景・完全鏡のdelta反射・物体の発光にはその重みを掛けません。
+NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBLの遮蔽は常に検査し、Direct lightingのShadows切り替えとは独立です。
+固定のバウンス上限によるパストレーシングです。発光面の直接サンプリング、デノイズ、Russian roulette、透過反射は未実装です。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 
 ```powershell
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --ibl "assets/local/studio.hdr" --spp 4 --samples 256 --screenshot build/checks/ibl.png
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --light-strength 0 --samples 256 --screenshot build/checks/ibl-only.png
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --ibl-intensity 0 --bounces 3 --samples 256 --screenshot build/checks/direct-bounces.png
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --ibl "assets/local/studio.hdr" --no-ibl-mis --spp 4 --samples 256 --screenshot build/checks/ibl-bsdf-only.png
 ```
 
 `--samples` は自動撮影前に待つ最小蓄積サンプル数（1～65536）です。`--spp` の指定や撮影フレームの実行により指定数以上になる場合があります。
 省略時の自動撮影は従来どおり数フレームの簡易確認です。間接照明の確認には `--samples 128` 以上を指定してください。
 HDR読み込みのCPUテストはDebug / Releaseの `EnvironmentMapTests.exe build/checks` で実行できます。
+同じテストでCDFの正規化・立体角PDF・黒マップ・高輝度画素の選択確率も検査します。
+`--no-ibl-mis` は従来のBRDFサンプリングだけに戻す比較用オプションです。NEE / MISのエネルギー検証は [WhiteFurnace](../../tests/WhiteFurnace.md) に含みます。
 
 参考: [PBRT: Infinite Area Lights](https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights)
+、[PBRT: A Better Path Tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer)
 
 ## 対応範囲
 

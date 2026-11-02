@@ -1,4 +1,5 @@
 #include "Pbr.hlsli"
+#include "EnvironmentSampling.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -14,6 +15,7 @@ StructuredBuffer<uint4> meshlets : register(t3);
 ByteAddressBuffer meshletTriangles : register(t4);
 Texture2D<float4> environmentMap : register(t5);
 StructuredBuffer<Material> materials : register(t6);
+StructuredBuffer<float2> environmentDistribution : register(t7);
 SamplerState environmentSampler : register(s0);
 RWTexture2D<float4> outputImage : register(u0);
 RWTexture2D<float4> accumulation : register(u1);
@@ -43,7 +45,8 @@ cbuffer SceneConstants : register(b0)
 	uint samplesPerFrame;
 	float environmentIntensity;
 	float environmentRotation;
-	float3 padding2;
+	uint environmentMis;
+	float2 padding2;
 };
 struct Payload
 {
@@ -69,8 +72,7 @@ float random(inout uint state)
 }
 float3 sampleEnvironment(float3 direction)
 {
-	float2 uv = float2(atan2(direction.z, direction.x) / (2.0f * pi) + 0.5f + environmentRotation / (2.0f * pi),
-		acos(clamp(direction.y, -1.0f, 1.0f)) / pi);
+	float2 uv = environmentUv(direction, environmentRotation);
 	return environmentMap.SampleLevel(environmentSampler, uv, 0).rgb * environmentIntensity;
 }
 float3 displayColor(float3 radiance)
@@ -136,6 +138,38 @@ float3 directLighting(Surface surface, float3 view)
 	float3 diffuseFill = surface.baseColor * (1.0f - surface.metallic) * (1.0f - materialF0(surface)) / pi;
 	return bsdf * lightColor * lightStrength * attenuation * cosine * visible + diffuseFill * ambient * surface.occlusion;
 }
+float3 environmentLighting(Surface surface, float3 view, float2 u)
+{
+	uint width, height;
+	environmentMap.GetDimensions(width, height);
+	float pdf;
+	float3 direction = sampleEnvironmentDirection(environmentDistribution, uint2(width, height), u, environmentRotation, pdf);
+	float cosine = dot(surface.normal, direction);
+	if (pdf <= 0.0f || cosine <= 0.0f || dot(surface.geometricNormal, direction) <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float bsdfPdf;
+	float3 bsdf = evaluateBsdf(surface, view, direction, bsdfPdf);
+	if (maxComponent(bsdf) <= 0.0f)
+	{
+		return 0.0f;
+	}
+	RayDesc ray;
+	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
+	ray.Direction = direction;
+	ray.TMin = 0.0f;
+	ray.TMax = 100000.0f;
+	// IBL occlusion is always physical; the Direct lighting shadow toggle is separate.
+	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
+	query.Proceed();
+	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	{
+		return 0.0f;
+	}
+	return bsdf * cosine * surface.occlusion * sampleEnvironment(direction) * powerHeuristic(pdf, bsdfPdf) / pdf;
+}
 [shader("raygeneration")]
 void RGSMain()
 {
@@ -162,6 +196,7 @@ void RGSMain()
 		ray.TMax = 100000.0f;
 		float3 throughput = 1.0f;
 		float3 radiance = 0.0f;
+		float missWeight = 1.0f;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
@@ -169,7 +204,7 @@ void RGSMain()
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 			if (payload.hit == 0)
 			{
-				radiance += throughput * payload.color;
+				radiance += throughput * payload.color * missWeight;
 				break;
 			}
 			Material material = materials[payload.materialIndex];
@@ -197,11 +232,27 @@ void RGSMain()
 			{
 				break;
 			}
+			if (environmentMis != 0 && environmentIntensity > 0.0f)
+			{
+				float2 lightU = float2(random(state), random(state));
+				radiance += throughput * environmentLighting(surface, view, lightU);
+			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
 			if (!sampleBsdf(surface, view, u, nextDirection, weight))
 			{
 				break;
+			}
+			missWeight = 1.0f;
+			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
+			if (environmentMis != 0 && environmentIntensity > 0.0f && !delta)
+			{
+				float bsdfPdf;
+				evaluateBsdf(surface, view, nextDirection, bsdfPdf);
+				uint width, height;
+				environmentMap.GetDimensions(width, height);
+				float lightPdf = environmentPdf(environmentDistribution, uint2(width, height), nextDirection, environmentRotation);
+				missWeight = powerHeuristic(bsdfPdf, lightPdf);
 			}
 			ray.Direction = nextDirection;
 			throughput *= weight;

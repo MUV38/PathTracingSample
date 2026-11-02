@@ -1,4 +1,5 @@
 #include "../samples/UsdKitchen/Pbr.hlsli"
+#include "../samples/UsdKitchen/EnvironmentSampling.hlsli"
 
 struct TestCase
 {
@@ -21,6 +22,7 @@ struct Result
 	float padding;
 };
 StructuredBuffer<TestCase> cases : register(t0);
+StructuredBuffer<float2> environmentDistribution : register(t1);
 RWStructuredBuffer<Result> results : register(u0);
 cbuffer Settings : register(b0)
 {
@@ -71,10 +73,31 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		{
 			weight = 0;
 		}
+		if ((input.referenceEnabled & 2u) != 0)
+		{
+			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
+			if (accepted && !delta)
+			{
+				float pdf;
+				evaluateBsdf(surface, view, direction, pdf);
+				weight *= powerHeuristic(pdf, environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f));
+			}
+			float lightPdf;
+			float2 lightU = float2(random(state), random(state));
+			float3 light = sampleEnvironmentDirection(environmentDistribution, uint2(16,8), lightU, 0.7f, lightPdf);
+			float bsdfPdf;
+			float3 bsdf = evaluateBsdf(surface, view, light, bsdfPdf);
+			weight += bsdf * max(light.z, 0.0f) * powerHeuristic(lightPdf, bsdfPdf) / lightPdf;
+			if (any(!isfinite(weight)) || any(weight < 0.0f))
+			{
+				++invalid;
+				weight = 0;
+			}
+		}
 		sum += weight;
 		sumSquared += weight * weight;
 		maximum = max(maximum, maxComponent(weight));
-		if (input.referenceEnabled != 0)
+		if ((input.referenceEnabled & 1u) != 0)
 		{
 			// Independently integrate BRDF evaluation with cosine hemisphere samples.
 			float radius = sqrt(random(state));

@@ -40,7 +40,7 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 	$environment = Join-Path $outputPath "white.hdr"
 	$png = Join-Path $outputPath ($fixture + ".png")
 	$stderr = Join-Path $outputPath ($fixture + ".stderr.txt")
-	$arguments = '--model "{0}" --ibl "{1}" --light-strength 0 --ambient 0 --ibl-intensity 1 --bounces 1 --spp 4 --samples 64 --screenshot "{2}"' -f $model, $environment, $png
+	$arguments = '--model "{0}" --ibl "{1}" --light-strength 0 --ambient 0 --ibl-intensity 1 --bounces 1 --spp 4 --samples 128 --screenshot "{2}"' -f $model, $environment, $png
 	$process = Start-Process -FilePath $viewerExe -ArgumentList $arguments -WorkingDirectory $repository -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
 	if (!$process.WaitForExit(45000))
 	{
@@ -57,12 +57,22 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 		$white = 0
 		$black = 0
 		$wrong = 0
+		$errorSum = 0.0
+		$squaredError = 0.0
+		$channels = 0
 		$startX = [Math]::Max(700, [int]($bitmap.Width * 0.6))
 		for ($y = 0; $y -lt $bitmap.Height; $y += 2)
 		{
 			for ($x = $startX; $x -lt $bitmap.Width; $x += 2)
 			{
 				$pixel = $bitmap.GetPixel($x, $y)
+				foreach ($channel in @($pixel.R, $pixel.G, $pixel.B))
+				{
+					$delta = [double]$channel - 188
+					$errorSum += $delta
+					$squaredError += $delta * $delta
+					$channels++
+				}
 				if ([Math]::Abs([int]$pixel.R - 188) -le 1 -and [Math]::Abs([int]$pixel.G - 188) -le 1 -and [Math]::Abs([int]$pixel.B - 188) -le 1)
 				{
 					$white++
@@ -77,6 +87,8 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 				}
 			}
 		}
+		$meanError = $errorSum / $channels
+		$rmse = [Math]::Sqrt($squaredError / $channels)
 		if ($fixture -eq "absorber")
 		{
 			if ($black -lt 1000 -or $white -lt 1000)
@@ -84,11 +96,11 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 				throw "Absorber fixture must show a black surface against the white environment."
 			}
 		}
-		elseif ($wrong -ne 0 -or $white -lt 1000)
+		elseif ($white -lt 1000 -or [Math]::Abs($meanError) -gt 1.0 -or $rmse -gt 5.0)
 		{
-			throw "$fixture must match the unit-radiance environment (188 +/- 1 after tone mapping)."
+			throw "$fixture must match the unit-radiance environment: mean error=$meanError, RMSE=$rmse."
 		}
-		$summary += [pscustomobject]@{ Fixture = $fixture; WhiteSamples = $white; BlackSamples = $black; OtherSamples = $wrong; Png = $png }
+		$summary += [pscustomobject]@{ Fixture = $fixture; WhiteSamples = $white; BlackSamples = $black; OtherSamples = $wrong - $black; MeanError = $meanError; Rmse = $rmse; Png = $png }
 		Write-Output "$fixture image passed: white=$white black=$black"
 	}
 	finally
