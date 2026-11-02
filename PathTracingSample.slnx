@@ -11,6 +11,7 @@
     <Project Path="samples/UsdKitchen/UsdKitchen.vcxproj" DefaultStartup="true" Id="f4680a75-5d93-4afb-a63a-79dc02ccb6c8" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="tests/WhiteFurnaceTests.vcxproj" />
     <Project Path="tests/EnvironmentMapTests.vcxproj" />
     <Project Path="tests/CameraTests.vcxproj" Id="b2a41a65-0885-4a57-b9e6-f14cc56f2c94" />
     <Project Path="tests/SceneFileTests.vcxproj" Id="410f9919-95aa-41a3-aebf-818b8936c841" />

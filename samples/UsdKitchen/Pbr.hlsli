@@ -71,7 +71,12 @@ float3 evaluateBsdf(Surface surface, float3 view, float3 direction, out float pd
 	float voH = max(dot(view, halfVector), 0.000001f);
 	float3 fresnel = fresnelSchlick(materialF0(surface), voH);
 	float pSpecular = specularProbability(surface, view);
-	float3 diffuse = (1.0f - fresnel) * (1.0f - surface.metallic) * surface.baseColor / pbrPi;
+	// Diffuse transport crosses the dielectric interface in both directions.
+	// Using only the half-vector Fresnel leaves almost full diffuse energy at
+	// grazing views while the mirror lobe also approaches unit reflectance.
+	float3 transmissionV = 1.0f - fresnelSchlick(materialF0(surface), noV);
+	float3 transmissionL = 1.0f - fresnelSchlick(materialF0(surface), noL);
+	float3 diffuse = transmissionV * transmissionL * (1.0f - surface.metallic) * surface.baseColor / pbrPi;
 	pdf = (1.0f - pSpecular) * noL / pbrPi;
 	// A smooth mirror is a delta distribution; it has no finite direct-light lobe.
 	if (surface.roughness < 0.001f)
