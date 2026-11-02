@@ -4,8 +4,22 @@
 
 #include <array>
 
+struct RectangleLighting
+{
+	bool mEnabled = false;
+	bool mMis = true;
+	DirectX::XMFLOAT3 mPosition{0.0f, 2.5f, 0.0f};
+	float mWidth = 1.0f;
+	float mHeight = 1.0f;
+	float mAzimuth = 0.0f;
+	float mElevation = -90.0f;
+	std::array<float, 3> mColor{1.0f, 0.96f, 0.88f};
+	float mRadiance = 10.0f;
+};
+
 struct Lighting
 {
+	RectangleLighting mRectangle;
 	bool mPointLight = false;
 	bool mShadows = true;
 	bool mHeadlight = false;

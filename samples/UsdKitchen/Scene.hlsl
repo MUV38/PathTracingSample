@@ -1,5 +1,6 @@
 #include "Pbr.hlsli"
 #include "EnvironmentSampling.hlsli"
+#include "RectangleLight.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -47,6 +48,7 @@ cbuffer SceneConstants : register(b0)
 	float environmentRotation;
 	uint environmentMis;
 	float2 padding2;
+	RectangleLight rectangle;
 };
 struct Payload
 {
@@ -89,6 +91,11 @@ float3 offsetOrigin(float3 position, float3 geometricNormal)
 {
 	return position + geometricNormal * rayBias(position);
 }
+bool rectangleOccludes(RayDesc ray)
+{
+	float distance;
+	return intersectRectangle(rectangle, ray.Origin, ray.Direction, ray.TMin, ray.TMax, distance);
+}
 float visibility(float3 position, float3 geometricNormal)
 {
 	if (shadows < 0.5f)
@@ -110,6 +117,10 @@ float visibility(float3 position, float3 geometricNormal)
 		}
 		ray.Direction = delta / distance;
 		ray.TMax = distance * 0.999999f;
+	}
+	if (rectangleOccludes(ray))
+	{
+		return 0.0f;
 	}
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
 	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
@@ -161,6 +172,10 @@ float3 environmentLighting(Surface surface, float3 view, float2 u)
 	ray.TMin = 0.0f;
 	ray.TMax = 100000.0f;
 	// IBL occlusion is always physical; the Direct lighting shadow toggle is separate.
+	if (rectangleOccludes(ray))
+	{
+		return 0.0f;
+	}
 	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
 	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
 	query.Proceed();
@@ -169,6 +184,44 @@ float3 environmentLighting(Surface surface, float3 view, float2 u)
 		return 0.0f;
 	}
 	return bsdf * cosine * surface.occlusion * sampleEnvironment(direction) * powerHeuristic(pdf, bsdfPdf) / pdf;
+}
+float3 rectangleLighting(Surface surface, float3 view, float2 u)
+{
+	float3 lightPoint = sampleRectanglePoint(rectangle, u);
+	float3 delta = lightPoint - surface.position;
+	float distanceSquared = dot(delta, delta);
+	float pdf = rectanglePdf(rectangle, surface.position, lightPoint);
+	if (pdf <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float3 direction = delta * rsqrt(distanceSquared);
+	float cosine = dot(surface.normal, direction);
+	if (cosine <= 0.0f || dot(surface.geometricNormal, direction) <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float bsdfPdf;
+	float3 bsdf = evaluateBsdf(surface, view, direction, bsdfPdf);
+	if (maxComponent(bsdf) <= 0.0f)
+	{
+		return 0.0f;
+	}
+	RayDesc ray;
+	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
+	float3 shadowDelta = lightPoint - ray.Origin;
+	float distance = length(shadowDelta);
+	ray.Direction = shadowDelta / max(distance, 0.000001f);
+	ray.TMin = 0.0f;
+	ray.TMax = max(0.0f, distance - rayBias(lightPoint));
+	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
+	query.Proceed();
+	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	{
+		return 0.0f;
+	}
+	return bsdf * cosine * surface.occlusion * rectangle.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
 }
 [shader("raygeneration")]
 void RGSMain()
@@ -197,11 +250,27 @@ void RGSMain()
 		float3 throughput = 1.0f;
 		float3 radiance = 0.0f;
 		float missWeight = 1.0f;
+		float previousBsdfPdf = 0.0f;
+		bool previousDelta = true;
+		float3 previousPosition = cameraPosition;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
 			payload.hit = 0;
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
+			float rectangleDistance;
+			if (intersectRectangle(rectangle, ray.Origin, ray.Direction, ray.TMin, ray.TMax, rectangleDistance)
+				&& (payload.hit == 0 || rectangleDistance < dot(payload.position - ray.Origin, ray.Direction)))
+			{
+				float weight = 1.0f;
+				if (depth > 0 && !previousDelta && rectangle.mis != 0)
+				{
+					float pdf = rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
+					weight = powerHeuristic(previousBsdfPdf, pdf);
+				}
+				radiance += throughput * rectangleEmission(rectangle, ray.Direction) * weight;
+				break;
+			}
 			if (payload.hit == 0)
 			{
 				radiance += throughput * payload.color * missWeight;
@@ -237,6 +306,11 @@ void RGSMain()
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * environmentLighting(surface, view, lightU);
 			}
+			if (rectangle.enabled != 0 && rectangle.mis != 0)
+			{
+				float2 lightU = float2(random(state), random(state));
+				radiance += throughput * rectangleLighting(surface, view, lightU);
+			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
 			if (!sampleBsdf(surface, view, u, nextDirection, weight))
@@ -253,6 +327,13 @@ void RGSMain()
 				environmentMap.GetDimensions(width, height);
 				float lightPdf = environmentPdf(environmentDistribution, uint2(width, height), nextDirection, environmentRotation);
 				missWeight = powerHeuristic(bsdfPdf, lightPdf);
+			}
+			previousPosition = surface.position;
+			previousDelta = delta;
+			previousBsdfPdf = 0.0f;
+			if (!delta)
+			{
+				evaluateBsdf(surface, view, nextDirection, previousBsdfPdf);
 			}
 			ray.Direction = nextDirection;
 			throughput *= weight;

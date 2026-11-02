@@ -23,6 +23,7 @@ Closest Hitで面の法線に応じた拡散照明を計算します。カメラ
 DxrCubeは単発の一次レイによるDXR入門サンプルです。多重反射・蓄積、影、CLASは使用していません。
 
 UsdKitchenはmeshletを読み込み、Metallic / Roughness方式のPBR、GGX鏡面反射、ハードシャドウ、複数バウンスの間接照明を描画します。
+矩形面光源1灯によるソフトシャドウと、光源の表示・鏡への映り込みにも対応します。`Rectangle light` パネルから有効にします。
 Miss時はIBLを参照します。自作の空マップを既定で使い、Radiance HDRの読み込みにも対応しています。
 IBLは輝度に応じた重点サンプリングとNEEを行い、BRDFサンプリングとMISで統合します。
 ImGuiの `IBL NEE / MIS` または比較用の `--no-ibl-mis` で従来方式へ切り替えられます。

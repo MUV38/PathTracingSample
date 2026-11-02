@@ -1,5 +1,6 @@
 #include "../samples/UsdKitchen/Pbr.hlsli"
 #include "../samples/UsdKitchen/EnvironmentSampling.hlsli"
+#include "../samples/UsdKitchen/RectangleLight.hlsli"
 
 struct TestCase
 {
@@ -8,7 +9,7 @@ struct TestCase
 	float roughness;
 	float specular;
 	float noV;
-	uint referenceEnabled;
+	uint flags; // 1: cosine reference, 2: MIS, 4: finite rectangle target.
 };
 struct Result
 {
@@ -54,9 +55,31 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	surface.specular = input.specular;
 	surface.occlusion = 1;
 	float3 view = float3(sqrt(1.0f - input.noV * input.noV), 0, input.noV);
+	RectangleLight rectangle = (RectangleLight)0;
+	rectangle.center = float3(0,0,2);
+	rectangle.enabled = 1;
+	rectangle.axisU = float3(1,0,0);
+	rectangle.axisV = float3(0,-1,0);
+	rectangle.width = rectangle.height = 2;
+	rectangle.radiance = 1;
+	bool rectangleTarget = (input.flags & 4u) != 0;
 	uint state = (group.x + 1u) * 277803737u + (thread + 1u) * 747796405u;
 	float3 sum = 0, sumSquared = 0, reference = 0, referenceSquared = 0;
 	uint invalid = 0, referenceInvalid = 0;
+	if (rectangleTarget)
+	{
+		float distance;
+		if (!intersectRectangle(rectangle, 0.0f, float3(0,0,1), 0.0001f, 10, distance) || abs(distance - 2) > 0.00001f
+			|| intersectRectangle(rectangle, 0.0f, float3(0,0,1), 0.0001f, 1, distance)
+			|| intersectRectangle(rectangle, 0.0f, float3(1,0,0), 0.0001f, 10, distance)
+			|| intersectRectangle(rectangle, float3(2,0,0), float3(0,0,1), 0.0001f, 10, distance)
+			|| abs(rectanglePdf(rectangle, 0.0f, rectangle.center) - 1.0f) > 0.00001f
+			|| rectanglePdf(rectangle, float3(0,0,3), rectangle.center) != 0.0f
+			|| any(rectangleEmission(rectangle, float3(0,0,-1)) != 0.0f))
+		{
+			++invalid;
+		}
+	}
 	float maximum = 0;
 	for (uint index = 0; index < samplesPerThread; ++index)
 	{
@@ -73,18 +96,35 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		{
 			weight = 0;
 		}
-		if ((input.referenceEnabled & 2u) != 0)
+		float hitDistance = 0;
+		if (rectangleTarget && accepted && !intersectRectangle(rectangle, 0.0f, direction, 0.0001f, 100000.0f, hitDistance))
+		{
+			weight = 0;
+		}
+		if ((input.flags & 2u) != 0)
 		{
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
 			if (accepted && !delta)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, direction, pdf);
-				weight *= powerHeuristic(pdf, environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f));
+				float lightPdf = rectangleTarget ? rectanglePdf(rectangle, 0.0f, direction * hitDistance)
+					: environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f);
+				weight *= powerHeuristic(pdf, lightPdf);
 			}
 			float lightPdf;
 			float2 lightU = float2(random(state), random(state));
-			float3 light = sampleEnvironmentDirection(environmentDistribution, uint2(16,8), lightU, 0.7f, lightPdf);
+			float3 light;
+			if (rectangleTarget)
+			{
+				float3 lightPoint = sampleRectanglePoint(rectangle, lightU);
+				light = normalize(lightPoint);
+				lightPdf = rectanglePdf(rectangle, 0.0f, lightPoint);
+			}
+			else
+			{
+				light = sampleEnvironmentDirection(environmentDistribution, uint2(16,8), lightU, 0.7f, lightPdf);
+			}
 			float bsdfPdf;
 			float3 bsdf = evaluateBsdf(surface, view, light, bsdfPdf);
 			weight += bsdf * max(light.z, 0.0f) * powerHeuristic(lightPdf, bsdfPdf) / lightPdf;
@@ -97,7 +137,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		sum += weight;
 		sumSquared += weight * weight;
 		maximum = max(maximum, maxComponent(weight));
-		if ((input.referenceEnabled & 1u) != 0)
+		if ((input.flags & 1u) != 0)
 		{
 			// Independently integrate BRDF evaluation with cosine hemisphere samples.
 			float radius = sqrt(random(state));
@@ -105,9 +145,19 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 			float3 light = float3(radius * cos(phi), radius * sin(phi), sqrt(1.0f - radius * radius));
 			float unusedPdf;
 			float3 value = evaluateBsdf(surface, view, light, unusedPdf) * pbrPi;
+			float referenceDistance;
+			if (rectangleTarget && !intersectRectangle(rectangle, 0.0f, light, 0.0001f, 100000.0f, referenceDistance))
+			{
+				value = 0;
+			}
 			if (surface.roughness < 0.001f)
 			{
-				value += fresnelSchlick(materialF0(surface), input.noV);
+				float mirrorDistance;
+				float3 mirrorDirection = reflect(-view, surface.normal);
+				if (!rectangleTarget || intersectRectangle(rectangle, 0.0f, mirrorDirection, 0.0001f, 100000.0f, mirrorDistance))
+				{
+					value += fresnelSchlick(materialF0(surface), input.noV);
+				}
 			}
 			if (any(!isfinite(value)) || any(value < 0.0f))
 			{
