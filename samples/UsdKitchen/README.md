@@ -17,20 +17,23 @@ GeometryIndex()を使用するため、DXR Tier 1.1 / Shader Model 6.5が必要�
 同梱Preview Roomは192三角形、480共有頂点、9 meshletsです。
 マテリアルテーブルを含むv3形式を読み込みます。旧v1 / v2は未対応のためUSDから再変換してください。
 
-初期表示はリポジトリ用に作成した **Preview Room** です。Kitchen Setとは異なる簡易モデルです。
+初期表示は `assets/local/Kitchen_set.ptscene` があればKitchen Setを優先します。通常版がなく `assets/local/Kitchen_set_instanced.ptscene` だけがある場合はそちらを使います。
+どちらもなければ、リポジトリ用に作成した **Preview Room** を表示します。Kitchen Setとは異なる簡易モデルです。
+通常利用の変換済みデータは `assets/local/` へ保存してください。`--model` / `--usd` の明示指定は既定モデルより優先します。
+既定の探索は実行ファイルからリポジトリの `.slnx` を見つけて `assets/` を使うため、Visual Studioや別のカレントディレクトリから起動しても同じモデルを選びます。リポジトリ外へ配布する場合は実行ファイル隣の `assets/local/` を使います。
 ソースは `assets/Source/PreviewRoom/`、変換済みデータは `assets/PreviewRoom.ptscene` です。
 カウンター天板は鏡、冷蔵庫は粗さのある青い金属に設定しています。
 
 ## Kitchen Setを表示する
 
 1. [公式ダウンロード一覧](https://openusd.org/release/dl_downloads.html) のKitchen Setを開き、利用者自身で条件を確認してダウンロードします。
-2. ZIPを `assets/local/KitchenSet/` などへ展開します。インストール操作は不要です。参照先のUSDやテクスチャを含むフォルダ構造を維持してください。
+2. ZIPを `assets/Source/Kitchen_set/` へ展開します。インストール操作は不要です。参照先のUSDやテクスチャを含むフォルダ構造を維持してください。
 3. [UsdConverter](../../tools/UsdConverter/README.md) を別ソリューションでビルドします。
 4. 実際に展開された `Kitchen_set.usd` のパスを指定し、変換します。
 
 ```powershell
-.\build\x64\Release\UsdConverter\UsdConverter.exe assets/local/KitchenSet/Kitchen_set.usd assets/local/KitchenSet/Kitchen.ptscene
-.\build\x64\Release\UsdKitchen\UsdKitchen.exe --model assets/local/KitchenSet/Kitchen.ptscene
+.\build\x64\Release\UsdConverter\UsdConverter.exe assets/Source/Kitchen_set/Kitchen_set.usd assets/local/Kitchen_set.ptscene
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe
 ```
 
 相対パスはカレントディレクトリ基準です。空白を含むパスは引用符で囲んでください。
@@ -38,7 +41,7 @@ Kitchen Setは同梱・自動取得しません。公式の利用条件に従い
 `assets/local/`、`assets/Source/Kitchen_set/`、`build/` はGit管理外です。
 利用者が配置した `assets/Source/Kitchen_set/Kitchen_set.usd` と `Kitchen_set_instanced.usd` で、Debug / Releaseの変換・描画を確認しました。
 2022-07-21版（同梱VERSION.txt）の通常版とインスタンス版は両構成で同じバイナリになり、1,788メッシュ出現、536,918三角形、25,980 meshlets、1,370,251頂点です。
-原本は移動せず、次のコマンドで変換結果・ログ・128サンプルの描画画像を `build/checks/kitchen-<構成>/` に保存できます。
+原本は移動せず、次のコマンドで変換テストの結果・ログ・128サンプルの描画画像を `build/checks/kitchen-<構成>/` に保存できます。通常利用の `assets/local/Kitchen_set.ptscene` は変更しません。
 
 ```powershell
 .\tests\RunKitchenSet.ps1 -Configuration Debug
@@ -56,7 +59,8 @@ Subdivisionは細分化せず制御ケージとして表示します。今回の
 `Scene files` を開き、`Open USD...` でソースを選び、必要なら `Choose converter...` でビルド済み `UsdConverter.exe` を選び、`Convert and load` を押します。
 変換は独立プロセスで実行します。既定では同じ構成の隣のUsdConverter、次にRelease構成を探します。
 変換中も描画でき、キャンセル可能です。失敗時は現在のモデルを維持し、Conversion logにエラーを表示します。
-変換結果とログは実行ファイル隣の `cache/` に保存します。必要に応じてアプリ終了後に削除してください。
+通常の変換結果は `assets/local/<USDのファイル名>.ptscene` に保存します。同名USDの再変換ではこのファイルを更新します。ログは実行ファイル隣の `cache/` に保存します。
+テストや別の保存先を使う場合は `--conversion-output <保存先.ptscene>` で上書きできます。相対パスはカレントディレクトリ基準です。
 `Open binary...` から既存バイナリも開けます。
 
 ```powershell
@@ -66,7 +70,7 @@ Subdivisionは細分化せず制御ケージとして表示します。今回の
 自動撮影では変換・ロードが終わってから撮影します。起動時の変換失敗は終了コード1と標準エラーで通知します。
 
 ```powershell
-$app = Start-Process .\build\x64\Release\UsdKitchen\UsdKitchen.exe -ArgumentList '--usd "assets/Source/PreviewRoom/PreviewRoom.usda" --screenshot "build/checks/usd.png"' -Wait -PassThru
+$app = Start-Process .\build\x64\Release\UsdKitchen\UsdKitchen.exe -ArgumentList '--usd "assets/Source/PreviewRoom/PreviewRoom.usda" --conversion-output "build/checks/usd.ptscene" --screenshot "build/checks/usd.png"' -WindowStyle Hidden -Wait -PassThru
 $app.ExitCode
 ```
 

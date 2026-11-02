@@ -13,6 +13,39 @@
 
 namespace
 {
+std::filesystem::path assetDirectory()
+{
+	const auto executable = executableDirectory();
+	for (auto directory = executable; !directory.empty();)
+	{
+		if (std::filesystem::is_regular_file(directory / L"PathTracingSample.slnx"))
+		{
+			return directory / L"assets";
+		}
+		const auto parent = directory.parent_path();
+		if (parent == directory)
+		{
+			break;
+		}
+		directory = parent;
+	}
+	return executable / L"assets";
+}
+
+std::filesystem::path defaultScenePath()
+{
+	const auto assets = assetDirectory();
+	for (const auto* name : {L"Kitchen_set.ptscene", L"Kitchen_set_instanced.ptscene"})
+	{
+		const auto kitchen = assets / L"local" / name;
+		if (std::filesystem::is_regular_file(kitchen))
+		{
+			return kitchen;
+		}
+	}
+	return executableDirectory() / L"assets/PreviewRoom.ptscene";
+}
+
 std::string utf8(const std::filesystem::path& path)
 {
 	const auto bytes = path.u8string();
@@ -340,9 +373,9 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			}
 			continue;
 		}
-		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
+		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl" && flag != L"--conversion-output") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -356,6 +389,10 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		else if (flag == L"--ibl")
 		{
 			mEnvironmentPath = path;
+		}
+		else if (flag == L"--conversion-output")
+		{
+			mConfiguredOutput = path;
 		}
 		else
 		{
@@ -394,7 +431,7 @@ void UsdKitchen::initialize(Renderer& renderer)
 	}
 	else
 	{
-		loadModel(mModelPath.empty() ? executableDirectory() / L"assets/PreviewRoom.ptscene" : mModelPath);
+		loadModel(mModelPath.empty() ? defaultScenePath() : mModelPath);
 	}
 }
 
@@ -461,7 +498,9 @@ void UsdKitchen::startConversion()
 	const auto cache = executableDirectory() / L"cache";
 	std::filesystem::create_directories(cache);
 	const auto stem = L"scene-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
-	mPendingBinary = cache / (stem + L".ptscene");
+	mPendingBinary = mConfiguredOutput.empty() ? assetDirectory() / L"local" / (source.stem().native() + L".ptscene")
+		: std::filesystem::absolute(mConfiguredOutput);
+	std::filesystem::create_directories(mPendingBinary.parent_path());
 	mLogPath = cache / (stem + L".log");
 	SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
 	HANDLE log = CreateFileW(mLogPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -578,7 +617,7 @@ void UsdKitchen::drawGui()
 		mNeedsFrame = false;
 	}
 	ImGui::TextUnformatted("USD binary scene viewer (DXR)");
-	ImGui::TextWrapped("Default: self-authored Preview Room. Kitchen Set must be obtained separately from Pixar.");
+	ImGui::TextWrapped("Default: local Kitchen Set when available, otherwise the self-authored Preview Room.");
 	if (ImGui::CollapsingHeader("Scene files"))
 	{
 		ImGui::BeginDisabled(mConversionProcess != nullptr);

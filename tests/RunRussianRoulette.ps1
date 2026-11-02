@@ -33,7 +33,8 @@ foreach ($case in $cases)
 		$name = $case.Name + "-" + $mode
 		$png = Join-Path $outputPath ($name + ".png")
 		$stderr = Join-Path $outputPath ($name + ".stderr.txt")
-		$arguments = '--spp 4 --ambient 0 {0} --screenshot "{1}"' -f $case.Options, $png
+		$preview = Join-Path $repository "assets/PreviewRoom.ptscene"
+		$arguments = '--model "{0}" --spp 4 --ambient 0 {1} --screenshot "{2}"' -f $preview, $case.Options, $png
 		if ($mode -eq "off")
 		{
 			$arguments += ' --no-russian-roulette'
