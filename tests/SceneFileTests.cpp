@@ -128,7 +128,7 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 	writeSceneFile(path, grid);
 	const auto loaded = readSceneFile(path);
 	require(expected == triangleSet(loaded.mVertices, meshletTriangleIndices(loaded)), "Meshlets lost triangles, winding, normals or colors.");
-	for (int mutation = 0; mutation < 4; ++mutation)
+	for (int mutation = 0; mutation < 5; ++mutation)
 	{
 		auto invalid = loaded;
 		if (mutation == 0)
@@ -141,11 +141,15 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 		}
 		else if (mutation == 2)
 		{
-			invalid.mMeshlets[0].mTriangleCount = 65;
+			invalid.mMeshlets[0].mTriangleCount = sceneMeshletMaxTriangles + 1;
+		}
+		else if (mutation == 3)
+		{
+			invalid.mMeshlets[1].mVertexOffset = UINT32_MAX;
 		}
 		else
 		{
-			invalid.mMeshlets[1].mVertexOffset = UINT32_MAX;
+			invalid.mMeshlets[0].mVertexCount = sceneMeshletMaxVertices + 1;
 		}
 		bool rejected = false;
 		try
@@ -158,6 +162,19 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 		}
 		require(rejected, "Invalid meshlet topology was accepted.");
 	}
+	// The recommended capacity is an upper bound, not a required fill count.
+	SceneData boundary;
+	boundary.mVertices.assign(loaded.mVertices.begin(), loaded.mVertices.begin() + sceneMeshletMaxVertices);
+	boundary.mMeshlets = {{0, 0, sceneMeshletMaxVertices, sceneMeshletMaxTriangles}};
+	boundary.mMeshletVertices.resize(sceneMeshletMaxVertices);
+	std::iota(boundary.mMeshletVertices.begin(), boundary.mMeshletVertices.end(), 0u);
+	for (uint32_t index = 0; index < sceneMeshletMaxTriangles * 3; ++index)
+	{
+		boundary.mMeshletTriangles.push_back(static_cast<uint8_t>(index % sceneMeshletMaxVertices));
+	}
+	writeSceneFile(directory / L"capacity.ptscene", boundary);
+	const auto capacity = readSceneFile(directory / L"capacity.ptscene");
+	require(meshletTriangleIndices(capacity).size() == 378, "A meshlet with 64 vertices / 126 triangles must round trip.");
 	// Unsupported versions must be rejected before allocating any payload.
 	auto header = loaded.mHeader;
 	header.mVersion = 1;

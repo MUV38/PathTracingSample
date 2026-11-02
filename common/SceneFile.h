@@ -47,7 +47,7 @@ struct SceneMeshlet
 static_assert(sizeof(SceneMeshlet) == 16);
 
 constexpr uint32_t sceneMeshletMaxVertices = 64;
-constexpr uint32_t sceneMeshletMaxTriangles = 64;
+constexpr uint32_t sceneMeshletMaxTriangles = 126;
 
 struct SceneData
 {

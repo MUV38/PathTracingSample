@@ -25,7 +25,8 @@ SDKのランタイムDLLとプラグインリソースをツールの出力先�
 
 同梱meshoptimizer v1.3の必要なC++ソースを直接コンパイルします。追加のインストールは不要です。
 位置・法線・色の36バイト全体で頂点を重複除去し、`meshopt_buildMeshletsSpatial` でレイトレーシング向けに分割します。
-最大64頂点・64三角形、目標最小32三角形、fill_weight 0.5です。小さい形状や頂点数の制限によって32三角形未満にもなります。
+最大64頂点・126三角形、目標最小32三角形、fill_weight 0.5です。小さい形状や頂点数の制限によって32三角形未満にもなります。
+上限は [NVIDIA公式のmeshlet推奨値](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/) に合わせています。Mesh Shader向けの推奨値を採用したもので、CLASでの最適サイズは別途評価が必要です。
 分割はワールド空間へ展開したシーン全体を対象とします。LOD、階層クラスタ、カリングはまだ生成しません。
 
 ## 独自形式 v2（meshlet専用）

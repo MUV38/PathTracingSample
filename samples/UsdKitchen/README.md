@@ -6,7 +6,8 @@ OpenUSDのヘッダー、DLL、Pythonは表示アプリに不要です。ルー�
 F / Frame modelはシーン全体にカメラを合わせます。HeadlightとExposureで表示を調整できます。
 
 meshoptimizer v1.3の `meshopt_buildMeshletsSpatial` で作成したmeshletを読み込みます。
-各meshletは最大64頂点・64三角形で、共有頂点の参照と8bitローカル三角形インデックスを持ちます。
+各meshletは最大64頂点・126三角形で、共有頂点の参照と8bitローカル三角形インデックスを持ちます。
+上限は [NVIDIAのmeshlet推奨値](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/) を採用しています。これはMesh Shader向けの推奨値で、CLASでの最適サイズの保証ではありません。
 1個のBLAS内にmeshletごとのindexed geometryを作り、Closest Hitでmeshletの頂点参照とローカルインデックスをGPU上でたどります。
 通常DXR用の32bitインデックスはロード時に生成します。バイナリ内のローカル構造をそのままGPUにも保持し、将来のCLAS実装の入力として利用できます。
 GeometryIndex()を使用するため、DXR Tier 1.1 / Shader Model 6.5が必要です。CLAS APIとMesh Shaderの実行はまだありません。

@@ -57,7 +57,7 @@ Agility SDKは将来のCLAS利用を見据えた指定版を維持していま�
 
 `UsdKitchen` は `.ptscene` 独自バイナリだけを読み込み、OpenUSDにはリンクしません。
 初期表示は同梱の自作 **Preview Room**（192三角形）です。Pixar Kitchen Setは含みません。
-変換ツールはmeshoptimizer **v1.3** で最大64頂点・64三角形のmeshletへ分割します。
+変換ツールはmeshoptimizer **v1.3** で最大64頂点・126三角形のmeshletへ分割します。
 表示アプリはmeshlet専用のv2バイナリを読みます。旧v1は未対応のためUSDから再変換してください。
 USDを変換する別ソリューションは `tools/UsdConverter/UsdConverter.slnx` です。
 既存OpenUSD SDKの指定、変換と表示、Kitchen Setの入手後の手順は
