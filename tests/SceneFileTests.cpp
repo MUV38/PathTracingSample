@@ -72,21 +72,22 @@ void checkConvertedFixture(const std::filesystem::path& path)
 
 auto triangleSet(const std::vector<SceneVertex>& vertices, const std::vector<uint32_t>& indices)
 {
-	std::map<std::array<float, 27>, size_t> triangles;
+	std::map<std::array<float, 30>, size_t> triangles;
 	for (size_t first = 0; first < indices.size(); first += 3)
 	{
-		std::array<float, 27> key{};
+		std::array<float, 30> key{};
 		for (size_t corner = 0; corner < 3; ++corner)
 		{
 			const auto& vertex = vertices[indices[first + corner]];
-			std::copy(vertex.mPosition.begin(), vertex.mPosition.end(), key.begin() + corner * 9);
-			std::copy(vertex.mNormal.begin(), vertex.mNormal.end(), key.begin() + corner * 9 + 3);
-			std::copy(vertex.mColor.begin(), vertex.mColor.end(), key.begin() + corner * 9 + 6);
+			std::copy(vertex.mPosition.begin(), vertex.mPosition.end(), key.begin() + corner * 10);
+			std::copy(vertex.mNormal.begin(), vertex.mNormal.end(), key.begin() + corner * 10 + 3);
+			std::copy(vertex.mColor.begin(), vertex.mColor.end(), key.begin() + corner * 10 + 6);
+			key[corner * 10 + 9] = static_cast<float>(vertex.mMaterialIndex);
 		}
 		auto best = key;
 		for (size_t rotation = 0; rotation < 2; ++rotation)
 		{
-			std::rotate(key.begin(), key.begin() + 9, key.end());
+			std::rotate(key.begin(), key.begin() + 10, key.end());
 			best = (std::min)(best, key);
 		}
 		++triangles[best];
@@ -119,6 +120,15 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 		vertex.mNormal = {0, 0, -1};
 		grid.mVertices.push_back(vertex);
 	}
+	grid.mMaterials.push_back(SceneMaterial{});
+	grid.mMaterials[1].mMetallic = 1;
+	grid.mMaterials[1].mRoughness = 0.15f;
+	for (size_t index = 0; index < 3; ++index)
+	{
+		auto vertex = grid.mVertices[index];
+		vertex.mMaterialIndex = 1;
+		grid.mVertices.push_back(vertex);
+	}
 	std::vector<uint32_t> sequential(grid.mVertices.size());
 	std::iota(sequential.begin(), sequential.end(), 0u);
 	const auto expected = triangleSet(grid.mVertices, sequential);
@@ -127,8 +137,9 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 	const auto path = directory / L"grid.ptscene";
 	writeSceneFile(path, grid);
 	const auto loaded = readSceneFile(path);
+	require(loaded.mMaterials.size() == 2 && loaded.mMaterials[1].mMetallic == 1 && loaded.mMaterials[1].mRoughness == 0.15f, "PBR material table changed.");
 	require(expected == triangleSet(loaded.mVertices, meshletTriangleIndices(loaded)), "Meshlets lost triangles, winding, normals or colors.");
-	for (int mutation = 0; mutation < 5; ++mutation)
+	for (int mutation = 0; mutation < 10; ++mutation)
 	{
 		auto invalid = loaded;
 		if (mutation == 0)
@@ -147,9 +158,29 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 		{
 			invalid.mMeshlets[1].mVertexOffset = UINT32_MAX;
 		}
-		else
+		else if (mutation == 4)
 		{
 			invalid.mMeshlets[0].mVertexCount = sceneMeshletMaxVertices + 1;
+		}
+		else if (mutation == 5)
+		{
+			invalid.mVertices[0].mMaterialIndex = UINT32_MAX;
+		}
+		else if (mutation == 6)
+		{
+			invalid.mMaterials[0].mRoughness = std::numeric_limits<float>::quiet_NaN();
+		}
+		else if (mutation == 7)
+		{
+			invalid.mMaterials[0].mMetallic = 1.1f;
+		}
+		else if (mutation == 8)
+		{
+			invalid.mMaterials[0].mEmissiveStrength = -1;
+		}
+		else
+		{
+			invalid.mVertices[0].mMaterialIndex = 1;
 		}
 		bool rejected = false;
 		try
@@ -176,12 +207,15 @@ void checkMeshletBuilder(const std::filesystem::path& directory)
 	const auto capacity = readSceneFile(directory / L"capacity.ptscene");
 	require(meshletTriangleIndices(capacity).size() == 378, "A meshlet with 64 vertices / 126 triangles must round trip.");
 	// Unsupported versions must be rejected before allocating any payload.
-	auto header = loaded.mHeader;
-	header.mVersion = 1;
-	std::ofstream unsupported(directory / L"unsupported.ptscene", std::ios::binary);
-	unsupported.write(reinterpret_cast<const char*>(&header), sizeof(header));
-	unsupported.close();
-	expectRejected(directory / L"unsupported.ptscene");
+	for (uint32_t version : {1u, 2u})
+	{
+		auto header = loaded.mHeader;
+		header.mVersion = version;
+		std::ofstream unsupported(directory / L"unsupported.ptscene", std::ios::binary);
+		unsupported.write(reinterpret_cast<const char*>(&header), sizeof(header));
+		unsupported.close();
+		expectRejected(directory / L"unsupported.ptscene");
+	}
 }
 }
 
@@ -190,7 +224,7 @@ int wmain(int count, wchar_t** arguments)
 	std::filesystem::path directory;
 	try
 	{
-		require(count >= 2 && count <= 3, "Usage: SceneFileTests <test-output-directory> [converted-ConversionFixture.ptscene]");
+		require(count >= 2 && count <= 4, "Usage: SceneFileTests <test-output-directory> [converted-ConversionFixture.ptscene] [converted-PbrFixture.ptscene]");
 		directory = std::filesystem::path(arguments[1]) / (L"scene-tests-" + std::to_wstring(GetCurrentProcessId()));
 		require(std::filesystem::create_directories(directory), "Test directory already exists.");
 		const auto path = directory / L"roundtrip.ptscene";
@@ -242,9 +276,23 @@ int wmain(int count, wchar_t** arguments)
 		}
 		require(rejected, "Non-finite export was accepted.");
 		require(readSceneFile(path).mVertices.size() == 3, "Failed export destroyed the previous file.");
-		if (count == 3)
+		if (count >= 3)
 		{
 			checkConvertedFixture(arguments[2]);
+		}
+		if (count == 4)
+		{
+			const auto pbr = readSceneFile(arguments[3]);
+			require(pbr.mMaterials.size() == 3 && pbr.mVertices.size() == 8 && pbr.mMeshletTriangles.size() == 12, "Material subset seams were lost.");
+			const auto& plastic = pbr.mMaterials[1];
+			const auto& metal = pbr.mMaterials[2];
+			require(std::abs(plastic.mBaseColor[0] - 0.8f) < 0.00001f && std::abs(plastic.mMetallic - 0.1f) < 0.00001f, "USD base color or metallic was lost.");
+			require(std::abs(plastic.mRoughness - 0.7f) < 0.00001f && std::abs(plastic.mSpecular - 0.5f) < 0.00001f && std::abs(plastic.mOcclusion - 0.8f) < 0.00001f, "USD roughness, IOR or AO was lost.");
+			require(metal.mMetallic == 1 && std::abs(metal.mRoughness - 0.15f) < 0.00001f && metal.mEmissiveColor == std::array<float,3>{1,0.5f,0.25f} && metal.mEmissiveStrength == 2, "USD subset material or HDR emission was lost.");
+			for (const auto& vertex : pbr.mVertices)
+			{
+				require(vertex.mColor == std::array<float,3>{1,1,1} && vertex.mMaterialIndex != 0, "Material-bound vertex parameters incorrect.");
+			}
 		}
 		checkMeshletBuilder(directory);
 		std::cout << "Scene file tests passed.\n";

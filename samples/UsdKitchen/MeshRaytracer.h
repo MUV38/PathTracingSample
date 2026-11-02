@@ -17,6 +17,7 @@ public:
 	void initialize(Renderer& renderer);
 	void load(Renderer& renderer, const SceneData& scene);
 	void loadEnvironment(Renderer& renderer, const EnvironmentMap& environment);
+	void updateMaterials(Renderer& renderer, const std::vector<SceneMaterial>& materials);
 	void resetAccumulation() { mResetAccumulation = true; }
 	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
 	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
@@ -29,6 +30,8 @@ private:
 	void resizeOutput(UINT width, UINT height);
 	ComPtr<ID3D12Device5> mDevice;
 	ComPtr<ID3D12Resource> mVertices;
+	ComPtr<ID3D12Resource> mMaterials;
+	size_t mMaterialCount = 0;
 	ComPtr<ID3D12Resource> mIndices;
 	ComPtr<ID3D12Resource> mMeshlets;
 	ComPtr<ID3D12Resource> mMeshletVertices;

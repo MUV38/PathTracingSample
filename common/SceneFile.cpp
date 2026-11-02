@@ -28,6 +28,7 @@ uint64_t payloadHash(const SceneData& scene)
 {
 	uint64_t hash = 14695981039346656037ull;
 	hashArray(hash, scene.mVertices);
+	hashArray(hash, scene.mMaterials);
 	hashArray(hash, scene.mMeshlets);
 	hashArray(hash, scene.mMeshletVertices);
 	hashArray(hash, scene.mMeshletTriangles);
@@ -37,13 +38,13 @@ uint64_t payloadHash(const SceneData& scene)
 void validate(const SceneData& scene)
 {
 	const auto& header = scene.mHeader;
-	if (header.mMagic != SceneHeader{}.mMagic || header.mVersion != 2 || header.mVertexStride != sizeof(SceneVertex))
+	if (header.mMagic != SceneHeader{}.mMagic || header.mVersion != 3 || header.mVertexStride != sizeof(SceneVertex))
 	{
 		throw std::runtime_error("Unsupported scene binary format or version.");
 	}
 	if (header.mVertexCount == 0 || header.mVertexCount > maxVertices)
 	{
-		throw std::runtime_error("Invalid triangle-list vertex count in scene binary.");
+		throw std::runtime_error("Invalid scene vertex count.");
 	}
 	for (size_t axis = 0; axis < 3; ++axis)
 	{
@@ -54,6 +55,10 @@ void validate(const SceneData& scene)
 	}
 	for (const auto& vertex : scene.mVertices)
 	{
+		if (vertex.mMaterialIndex >= scene.mMaterials.size())
+		{
+			throw std::runtime_error("Scene material index is out of range.");
+		}
 		for (size_t axis = 0; axis < 3; ++axis)
 		{
 			if (!std::isfinite(vertex.mPosition[axis]) || !std::isfinite(vertex.mNormal[axis]) || !std::isfinite(vertex.mColor[axis])
@@ -109,6 +114,21 @@ void validateMeshlets(const SceneData& scene)
 			throw std::runtime_error("Meshlet global vertex index is out of range.");
 		}
 	}
+	for (const auto& meshlet : scene.mMeshlets)
+	{
+		for (uint32_t triangle = 0; triangle < meshlet.mTriangleCount; ++triangle)
+		{
+			const auto materialAt = [&](uint32_t corner)
+			{
+				const uint32_t local = scene.mMeshletTriangles[meshlet.mTriangleOffset + triangle * 3 + corner];
+				return scene.mVertices[scene.mMeshletVertices[meshlet.mVertexOffset + local]].mMaterialIndex;
+			};
+			if (materialAt(0) != materialAt(1) || materialAt(0) != materialAt(2))
+			{
+				throw std::runtime_error("A triangle must have one material index.");
+			}
+		}
+	}
 }
 
 template<typename T> void readArray(std::ifstream& file, std::vector<T>& values, uint64_t count)
@@ -125,6 +145,34 @@ template<typename T> void writeArray(std::ofstream& file, const std::vector<T>& 
 	file.write(reinterpret_cast<const char*>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(T)));
 }
 
+}
+
+void validateSceneMaterials(const std::vector<SceneMaterial>& materials)
+{
+	if (materials.empty() || materials.size() > 65536)
+	{
+		throw std::runtime_error("Invalid material count.");
+	}
+	const auto unit = [](float value)
+	{
+		return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+	};
+	for (const auto& material : materials)
+	{
+		if (!unit(material.mMetallic) || !unit(material.mRoughness) || !unit(material.mSpecular) || !unit(material.mOcclusion)
+			|| !std::isfinite(material.mEmissiveStrength) || material.mEmissiveStrength < 0 || material.mEmissiveStrength > 100000
+			|| material.mPadding != 0.0f)
+		{
+			throw std::runtime_error("Invalid PBR material parameters.");
+		}
+		for (size_t axis = 0; axis < 3; ++axis)
+		{
+			if (!unit(material.mBaseColor[axis]) || !unit(material.mEmissiveColor[axis]))
+			{
+				throw std::runtime_error("Invalid PBR material color.");
+			}
+		}
+	}
 }
 
 SceneData readSceneFile(const std::filesystem::path& path)
@@ -147,21 +195,24 @@ SceneData readSceneFile(const std::filesystem::path& path)
 	if (!file.read(reinterpret_cast<char*>(&meshlets), sizeof(meshlets))
 		|| meshlets.mMeshletCount == 0 || meshlets.mMeshletCount > maxVertices / 3
 		|| meshlets.mVertexReferenceCount == 0 || meshlets.mVertexReferenceCount > maxVertices
-		|| meshlets.mTriangleByteCount == 0 || meshlets.mTriangleByteCount > maxVertices || meshlets.mTriangleByteCount % 3 != 0)
+		|| meshlets.mTriangleByteCount == 0 || meshlets.mTriangleByteCount > maxVertices || meshlets.mTriangleByteCount % 3 != 0
+		|| meshlets.mMaterialCount == 0 || meshlets.mMaterialCount > 65536)
 	{
 		throw std::runtime_error("Invalid meshlet header.");
 	}
 	expectedSize += sizeof(meshlets) + meshlets.mMeshletCount * sizeof(SceneMeshlet)
-		+ meshlets.mVertexReferenceCount * sizeof(uint32_t) + meshlets.mTriangleByteCount;
+		+ meshlets.mVertexReferenceCount * sizeof(uint32_t) + meshlets.mTriangleByteCount + meshlets.mMaterialCount * sizeof(SceneMaterial);
 	if (fileSize != expectedSize)
 	{
 		throw std::runtime_error("Scene binary size does not match its header.");
 	}
 	readArray(file, scene.mVertices, scene.mHeader.mVertexCount);
+	readArray(file, scene.mMaterials, meshlets.mMaterialCount);
 	readArray(file, scene.mMeshlets, meshlets.mMeshletCount);
 	readArray(file, scene.mMeshletVertices, meshlets.mVertexReferenceCount);
 	readArray(file, scene.mMeshletTriangles, meshlets.mTriangleByteCount);
 	validate(scene);
+	validateSceneMaterials(scene.mMaterials);
 	if (payloadHash(scene) != scene.mHeader.mPayloadHash)
 	{
 		throw std::runtime_error("Scene binary checksum mismatch.");
@@ -172,7 +223,7 @@ SceneData readSceneFile(const std::filesystem::path& path)
 
 void writeSceneFile(const std::filesystem::path& path, SceneData& scene)
 {
-	scene.mHeader.mVersion = 2;
+	scene.mHeader.mVersion = 3;
 	scene.mHeader.mVertexCount = scene.mVertices.size();
 	scene.mHeader.mMinimum.fill((std::numeric_limits<float>::max)());
 	scene.mHeader.mMaximum.fill((std::numeric_limits<float>::lowest)());
@@ -185,9 +236,10 @@ void writeSceneFile(const std::filesystem::path& path, SceneData& scene)
 		}
 	}
 	validate(scene);
+	validateSceneMaterials(scene.mMaterials);
 	validateMeshlets(scene);
 	scene.mHeader.mPayloadHash = payloadHash(scene);
-	const SceneMeshletHeader meshlets{scene.mMeshlets.size(), scene.mMeshletVertices.size(), scene.mMeshletTriangles.size()};
+	const SceneMeshletHeader meshlets{scene.mMeshlets.size(), scene.mMeshletVertices.size(), scene.mMeshletTriangles.size(), scene.mMaterials.size()};
 	if (!path.parent_path().empty())
 	{
 		std::filesystem::create_directories(path.parent_path());
@@ -200,6 +252,7 @@ void writeSceneFile(const std::filesystem::path& path, SceneData& scene)
 		file.write(reinterpret_cast<const char*>(&scene.mHeader), sizeof(SceneHeader));
 		file.write(reinterpret_cast<const char*>(&meshlets), sizeof(meshlets));
 		writeArray(file, scene.mVertices);
+		writeArray(file, scene.mMaterials);
 		writeArray(file, scene.mMeshlets);
 		writeArray(file, scene.mMeshletVertices);
 		writeArray(file, scene.mMeshletTriangles);

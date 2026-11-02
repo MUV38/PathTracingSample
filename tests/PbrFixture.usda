@@ -1,0 +1,52 @@
+#usda 1.0
+(
+	metersPerUnit = 1
+	upAxis = "Y"
+)
+def Scope "Looks"
+{
+	def Material "Plastic"
+	{
+		token outputs:surface.connect = </Looks/Plastic/Shader.outputs:surface>
+		def Shader "Shader"
+		{
+			uniform token info:id = "UsdPreviewSurface"
+			color3f inputs:diffuseColor = (0.8, 0.2, 0.1)
+			float inputs:metallic = 0.1
+			float inputs:roughness = 0.7
+			float inputs:ior = 1.5
+			float inputs:occlusion = 0.8
+			token outputs:surface
+		}
+	}
+	def Material "Metal"
+	{
+		token outputs:surface.connect = </Looks/Metal/Shader.outputs:surface>
+		def Shader "Shader"
+		{
+			uniform token info:id = "UsdPreviewSurface"
+			color3f inputs:diffuseColor = (0.9, 0.7, 0.3)
+			float inputs:metallic = 1
+			float inputs:roughness = 0.15
+			float inputs:occlusion = 0.6
+			color3f inputs:emissiveColor = (2, 1, 0.5)
+			token outputs:surface
+		}
+	}
+}
+def Mesh "Panels" (prepend apiSchemas = ["MaterialBindingAPI"])
+{
+	point3f[] points = [(-2,0,-1), (0,0,-1), (0,0,1), (-2,0,1), (2,0,-1), (2,0,1)]
+	int[] faceVertexCounts = [4,4]
+	int[] faceVertexIndices = [0,3,2,1, 1,2,5,4]
+	uniform token subdivisionScheme = "none"
+	normal3f[] normals = [(0,1,0)] (interpolation = "constant")
+	rel material:binding = </Looks/Plastic>
+	def GeomSubset "MetalFace" (prepend apiSchemas = ["MaterialBindingAPI"])
+	{
+		uniform token elementType = "face"
+		uniform token familyName = "materialBind"
+		int[] indices = [1]
+		rel material:binding = </Looks/Metal>
+	}
+}

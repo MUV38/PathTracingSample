@@ -4,6 +4,7 @@
 #include "MeshRaytracer.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,11 @@ private:
 	Camera mCamera;
 	CameraController mController;
 	SceneHeader mHeader;
+	std::vector<SceneMaterial> mMaterials;
+	int mSelectedMaterial = 0;
+	std::optional<float> mOverrideMetallic;
+	std::optional<float> mOverrideRoughness;
+	std::optional<float> mOverrideSpecular;
 	size_t mTriangleCount = 0;
 	size_t mMeshletCount = 0;
 	DirectX::XMFLOAT3 mFocusPoint{};

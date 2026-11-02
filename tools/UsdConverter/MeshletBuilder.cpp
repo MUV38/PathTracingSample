@@ -38,7 +38,8 @@ void buildSceneMeshlets(SceneData& scene)
 		maxVertices, 32, maxTriangles, 0.5f);
 	SceneData result;
 	result.mHeader = scene.mHeader;
-	result.mHeader.mVersion = 2;
+	result.mHeader.mVersion = 3;
+	result.mMaterials = std::move(scene.mMaterials);
 	result.mVertices = std::move(vertices);
 	for (size_t index = 0; index < count; ++index)
 	{
