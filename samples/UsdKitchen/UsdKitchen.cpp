@@ -97,9 +97,45 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mMeshletColors = true;
 			continue;
 		}
+		if (flag == L"--no-shadows")
+		{
+			mLighting.mShadows = false;
+			continue;
+		}
+		if ((flag == L"--light" || flag == L"--ambient" || flag == L"--light-strength") && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			if (flag == L"--light")
+			{
+				if (value != L"directional" && value != L"point")
+				{
+					throw std::runtime_error("--light must be directional or point.");
+				}
+				mLighting.mPointLight = value == L"point";
+			}
+			else
+			{
+				size_t consumed = 0;
+				const float number = std::stof(value, &consumed);
+				const float maximum = flag == L"--ambient" ? 2.0f : 200.0f;
+				if (consumed != value.size() || !std::isfinite(number) || number < 0.0f || number > maximum)
+				{
+					throw std::runtime_error("Light strength must be in [0, 200], ambient in [0, 2].");
+				}
+				if (flag == L"--ambient")
+				{
+					mLighting.mAmbient = number;
+				}
+				else
+				{
+					mLighting.mDirectionalStrength = mLighting.mPointStrength = number;
+				}
+			}
+			continue;
+		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model <scene.ptscene> OR --usd <source.usd>, optional --converter <UsdConverter.exe> and --meshlet-colors.");
+			throw std::runtime_error("UsdKitchen options: --model <scene.ptscene> OR --usd <source.usd>, --converter <UsdConverter.exe>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -161,6 +197,7 @@ void UsdKitchen::loadModel(const std::filesystem::path& path)
 	const float y = mHeader.mMaximum[1] - mHeader.mMinimum[1];
 	const float z = mHeader.mMaximum[2] - mHeader.mMinimum[2];
 	mRadius = (std::max)(0.01f, std::sqrt(x * x + y * y + z * z) * 0.5f);
+	mLighting.mPosition = {mFocusPoint.x + x * 0.2f, mHeader.mMinimum[1] + y * 0.8f, mFocusPoint.z + z * 0.2f};
 	frameModel();
 	mNeedsFrame = true;
 	mStatus = "Loaded: " + utf8(path.filename());
@@ -309,50 +346,53 @@ void UsdKitchen::drawGui()
 	}
 	ImGui::TextUnformatted("USD binary scene viewer (DXR)");
 	ImGui::TextWrapped("Default: self-authored Preview Room. Kitchen Set must be obtained separately from Pixar.");
-	ImGui::BeginDisabled(mConversionProcess != nullptr);
-	try
+	if (ImGui::CollapsingHeader("Scene files"))
 	{
-		if (ImGui::Button("Open USD..."))
+		ImGui::BeginDisabled(mConversionProcess != nullptr);
+		try
 		{
-			const auto path = chooseFile(mRenderer->window(), L"USD scene", L"*.usd;*.usda;*.usdc;*.usdz");
-			if (!path.empty())
+			if (ImGui::Button("Open USD..."))
 			{
-				setPath(mUsdInput, path);
+				const auto path = chooseFile(mRenderer->window(), L"USD scene", L"*.usd;*.usda;*.usdc;*.usdz");
+				if (!path.empty())
+				{
+					setPath(mUsdInput, path);
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Open binary..."))
+			{
+				const auto path = chooseFile(mRenderer->window(), L"Converted scene", L"*.ptscene");
+				if (!path.empty())
+				{
+					loadModel(path);
+				}
+			}
+			ImGui::InputText("USD file", mUsdInput.data(), mUsdInput.size());
+			ImGui::InputText("Converter", mConverterInput.data(), mConverterInput.size());
+			if (ImGui::Button("Choose converter..."))
+			{
+				const auto path = chooseFile(mRenderer->window(), L"USD converter", L"*.exe");
+				if (!path.empty())
+				{
+					setPath(mConverterInput, path);
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Convert and load"))
+			{
+				startConversion();
 			}
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Open binary..."))
+		catch (const std::exception& error)
 		{
-			const auto path = chooseFile(mRenderer->window(), L"Converted scene", L"*.ptscene");
-			if (!path.empty())
-			{
-				loadModel(path);
-			}
+			mStatus = error.what();
 		}
-		ImGui::InputText("USD file", mUsdInput.data(), mUsdInput.size());
-		ImGui::InputText("Converter", mConverterInput.data(), mConverterInput.size());
-		if (ImGui::Button("Choose converter..."))
+		ImGui::EndDisabled();
+		if (mConversionProcess && ImGui::Button("Cancel conversion"))
 		{
-			const auto path = chooseFile(mRenderer->window(), L"USD converter", L"*.exe");
-			if (!path.empty())
-			{
-				setPath(mConverterInput, path);
-			}
+			cancelConversion();
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Convert and load"))
-		{
-			startConversion();
-		}
-	}
-	catch (const std::exception& error)
-	{
-		mStatus = error.what();
-	}
-	ImGui::EndDisabled();
-	if (mConversionProcess && ImGui::Button("Cancel conversion"))
-	{
-		cancelConversion();
 	}
 	ImGui::TextWrapped("%s", mStatus.c_str());
 	if (mHasScene)
@@ -370,9 +410,32 @@ void UsdKitchen::drawGui()
 	{
 		frameModel();
 	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Headlight", &mHeadlight);
 	ImGui::SliderFloat("Exposure", &mExposure, 0.1f, 3.0f);
+	if (ImGui::CollapsingHeader("Direct lighting", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		int type = mLighting.mPointLight ? 1 : 0;
+		ImGui::Combo("Light type", &type, "Directional\0Point\0");
+		mLighting.mPointLight = type == 1;
+		ImGui::Checkbox("Shadows", &mLighting.mShadows);
+		ImGui::ColorEdit3("Light color (linear)", mLighting.mColor.data(), ImGuiColorEditFlags_Float);
+		if (mLighting.mPointLight)
+		{
+			ImGui::DragFloat3("Light position (m)", &mLighting.mPosition.x, mRadius * 0.01f);
+			ImGui::SliderFloat("Point intensity", &mLighting.mPointStrength, 0.0f, 200.0f);
+		}
+		else
+		{
+			ImGui::Checkbox("Headlight", &mLighting.mHeadlight);
+			ImGui::BeginDisabled(mLighting.mHeadlight);
+			ImGui::SliderFloat("Light azimuth", &mLighting.mAzimuth, -180.0f, 180.0f, "%.1f deg");
+			ImGui::SliderFloat("Light elevation", &mLighting.mElevation, -89.0f, 89.0f, "%.1f deg");
+			ImGui::EndDisabled();
+			ImGui::SliderFloat("Directional irradiance", &mLighting.mDirectionalStrength, 0.0f, 20.0f);
+		}
+		ImGui::SliderFloat("Ambient fill", &mLighting.mAmbient, 0.0f, 2.0f);
+		ImGui::SliderFloat("Shadow bias (m)", &mLighting.mShadowBias, 0.000001f, 0.01f, "%.6f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::TextWrapped("Lambert diffuse + opaque hard shadows. Ambient fill is a preview aid, not indirect lighting.");
+	}
 	if (ImGui::CollapsingHeader("Camera controls"))
 	{
 		ImGui::TextWrapped("RMB + WASD / Q,E: move; Shift: faster; wheel: speed. Alt + LMB / MMB / RMB: orbit / pan / dolly.");
@@ -390,6 +453,6 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 {
 	if (mHasScene)
 	{
-		mRaytracer.render(renderer, mCamera, mViewportLeft, mHeadlight, mExposure, mMeshletColors, commands, backBuffer);
+		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mExposure, mMeshletColors, commands, backBuffer);
 	}
 }

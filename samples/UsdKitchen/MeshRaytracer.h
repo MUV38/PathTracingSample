@@ -2,6 +2,7 @@
 
 #include "SceneFile.h"
 #include "Camera.h"
+#include "Lighting.h"
 
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -13,7 +14,7 @@ class MeshRaytracer final
 public:
 	void initialize(Renderer& renderer);
 	void load(Renderer& renderer, const SceneData& scene);
-	void render(Renderer& renderer, const Camera& camera, float viewportLeft, bool headlight, float exposure, bool meshletColors,
+	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, float exposure, bool meshletColors,
 		ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer);
 
 private:

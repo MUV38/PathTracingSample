@@ -21,9 +21,16 @@ cbuffer SceneConstants : register(b0)
 	float3 cameraForward;
 	float meshletColors;
 	float3 backgroundColor;
-	float padding2;
-	float3 lightDirection;
 	float exposure;
+	float3 lightDirection;
+	float shadows;
+	float3 lightPosition;
+	float pointLight;
+	float3 lightColor;
+	float lightStrength;
+	float ambient;
+	float shadowBias;
+	float2 padding;
 };
 struct Payload
 {
@@ -32,6 +39,44 @@ struct Payload
 uint localIndex(uint offset)
 {
 	return (meshletTriangles.Load(offset & ~3u) >> ((offset & 3u) * 8u)) & 255u;
+}
+float3 displayColor(float3 radiance)
+{
+	float3 mapped = max(radiance * exposure, 0.0f);
+	mapped = mapped / (1.0f + mapped);
+	return select(mapped <= 0.0031308f, mapped * 12.92f, 1.055f * pow(mapped, 1.0f / 2.4f) - 0.055f);
+}
+
+float visibility(float3 position, float3 geometricNormal)
+{
+	if (shadows < 0.5f)
+	{
+		return 1.0f;
+	}
+	// Geometric-normal offset avoids sending rays beneath smoothed surfaces.
+	// A relative term also keeps the offset representable far from the origin.
+	float bias = max(shadowBias, 0.000001f * max(max(abs(position.x), abs(position.y)), abs(position.z)));
+	RayDesc ray;
+	ray.Origin = position + geometricNormal * bias;
+	ray.TMin = 0.0f;
+	ray.Direction = lightDirection;
+	ray.TMax = 100000.0f;
+	if (pointLight > 0.5f)
+	{
+		float3 delta = lightPosition - ray.Origin;
+		float distance = length(delta);
+		if (distance <= bias)
+		{
+			return 1.0f;
+		}
+		ray.Direction = delta / distance;
+		ray.TMax = distance * 0.999999f;
+	}
+	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
+	// All geometry is opaque triangles, so no candidate requires shader handling.
+	query.Proceed();
+	return query.CommittedStatus() == COMMITTED_NOTHING ? 1.0f : 0.0f;
 }
 [shader("raygeneration")]
 void RGSMain()
@@ -71,8 +116,18 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 	Vertex b = vertices[meshletVertices[vertexOffset + localIndex(first + 1)]];
 	Vertex c = vertices[meshletVertices[vertexOffset + localIndex(first + 2)]];
 	float3 weights = float3(1.0f - attributes.barycentrics.x - attributes.barycentrics.y, attributes.barycentrics);
-	float3 normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z);
-	if (dot(normal, WorldRayDirection()) > 0.0f)
+	float3 geometricNormal = normalize(cross(b.position - a.position, c.position - a.position));
+	if (dot(geometricNormal, WorldRayDirection()) > 0.0f)
+	{
+		geometricNormal = -geometricNormal;
+	}
+	float3 normal = a.normal * weights.x + b.normal * weights.y + c.normal * weights.z;
+	if (dot(normal, normal) < 0.000001f)
+	{
+		normal = geometricNormal;
+	}
+	normal = normalize(normal);
+	if (dot(normal, geometricNormal) < 0.0f)
 	{
 		normal = -normal;
 	}
@@ -84,6 +139,24 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 		hash = (hash >> 22u) ^ hash;
 		color = 0.2f + 0.8f * float3(hash & 255u, (hash >> 8u) & 255u, (hash >> 16u) & 255u) / 255.0f;
 	}
-	float diffuse = saturate(dot(normal, normalize(lightDirection)));
-	payload.color = pow(saturate(color * (0.2f + 0.8f * diffuse) * exposure), 1.0f / 2.2f);
+	float3 position = a.position + attributes.barycentrics.x * (b.position - a.position)
+		+ attributes.barycentrics.y * (c.position - a.position);
+	float3 toLight = lightDirection;
+	float attenuation = 1.0f;
+	if (pointLight > 0.5f)
+	{
+		float3 delta = lightPosition - position;
+		float distanceSquared = max(dot(delta, delta), 0.0001f);
+		toLight = delta * rsqrt(distanceSquared);
+		attenuation = rcp(distanceSquared);
+	}
+	float cosine = saturate(dot(normal, toLight));
+	float visible = 0.0f;
+	if (cosine > 0.0f && dot(geometricNormal, toLight) > 0.0f && lightStrength > 0.0f)
+	{
+		visible = visibility(position, geometricNormal);
+	}
+	// Lambert BRDF = albedo / pi. The adjustable ambient term is only a preview fill.
+	float3 irradiance = ambient + lightColor * lightStrength * attenuation * cosine * visible;
+	payload.color = displayColor(color * (1.0f / 3.14159265f) * irradiance);
 }
