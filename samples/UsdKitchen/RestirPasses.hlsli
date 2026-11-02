@@ -85,7 +85,7 @@ void prepareRestir(uint2 pixel, uint state)
 				float3 view = -ray.Direction;
 				// Independent of path sampling and accumulation resets while moving.
 				state = address ^ ((restirFrame + 1u) * 0xa511e9b3u);
-				if (meshLightCount > 0 && emissiveMis != 0 && maxBounces > 0 && meshletColors < 0.5f)
+				if (restirMode > 0 && meshLightCount > 0 && emissiveMis != 0 && maxBounces > 0 && meshletColors < 0.5f)
 				{
 					for (uint i = 0; i < 8; ++i)
 					{

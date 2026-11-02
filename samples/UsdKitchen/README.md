@@ -171,6 +171,7 @@ Metallic / Roughnessなどの変更だけでは光源表を再構築しません
 一次ヒットの発光メッシュ照明には、オプションでReSTIR DIを使用できます。既定は従来のNEE / MISです。
 ImGuiの `ReSTIR DI`、または `--restir off|ris|temporal|spatial` で、8候補RIS・時間再利用・空間再利用を段階的に比較できます。
 G-bufferの法線・深度・モーション・Reservoir履歴は `--restir spatial --restir-debug normal|depth|motion|reservoir` で表示します。
+G-buffer viewはNEE / MIS選択中や発光三角形0でも使用できます。例えば `--restir-debug normal` だけで法線を表示します。
 IBL・矩形ライト・二次ヒット以降は既存の方式です。[仕組み・検証・メモリ使用量と制限](../../tests/RestirDI.md) を参照してください。
 
 Russian Rouletteは既定で有効です。3回の反射後からスループットのRGB最大成分に応じて継続を抽選し、生存した経路を確率の逆数で補正します。

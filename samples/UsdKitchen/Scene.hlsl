@@ -466,7 +466,7 @@ void RGSMain()
 	}
 	accumulation[pixel] = float4(average, 1.0f);
 	outputImage[pixel] = float4(displayColor(average), 1.0f);
-	if (restirMode > 0 && restirDebug > 0)
+	if (restirDebug > 0)
 	{
 		uint address = pixel.x + pixel.y * DispatchRaysDimensions().x;
 		PrimarySurface primary = primarySurfaces[address];
@@ -487,7 +487,7 @@ void RGSMain()
 			}
 			else
 			{
-				debugColor = float3(currentReservoirs[address].count / 200.0f, historyValid != 0 ? 1.0f : 0.0f, 0);
+				debugColor = float3(currentReservoirs[address].count / 200.0f, historyValid != 0 && restirMode >= 2 ? 1.0f : 0.0f, 0);
 			}
 		}
 		outputImage[pixel] = float4(debugColor, 1);

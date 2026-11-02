@@ -39,6 +39,11 @@ foreach ($debug in @("normal", "depth", "motion", "reservoir"))
 {
 	$cases += @{ Name=$debug; Model="multiple"; Mode="spatial"; Samples=128; Options="--restir-debug " + $debug }
 }
+foreach ($debug in @("normal", "depth", "motion"))
+{
+	# Debug views must also work with NEE and without any emissive triangles.
+	$cases += @{ Name=$debug + "-nee"; Model="dark"; Mode="off"; Samples=128; Options="--restir-debug " + $debug }
+}
 Add-Type -AssemblyName System.Drawing
 $summary = @()
 foreach ($case in $cases)
@@ -64,6 +69,7 @@ foreach ($case in $cases)
 		$count = 0
 		$maximum = 0
 		$normalPixels = 0
+		$depthPixels = 0
 		$motionPixels = 0
 		$historyPixels = 0
 		foreach ($y in 0..([int]($bitmap.Height / 2) - 1))
@@ -78,6 +84,10 @@ foreach ($case in $cases)
 					$sum[1] += $pixel.G
 					$sum[2] += $pixel.B
 					$count++
+					if ($pixel.R -gt 0 -and $pixel.R -lt 255 -and $pixel.R -eq $pixel.G -and $pixel.R -eq $pixel.B)
+					{
+						$depthPixels++
+					}
 					if ($pixel.G -gt 250 -and [Math]::Abs($pixel.R - 128) -le 1 -and [Math]::Abs($pixel.B - 128) -le 1)
 					{
 						$normalPixels++
@@ -94,8 +104,9 @@ foreach ($case in $cases)
 			}
 		}
 		if (($case.Name -eq "dark" -and $maximum -ne 0) -or
-			($case.Name -eq "normal" -and $normalPixels -lt 1000) -or
-			($case.Name -eq "motion" -and $motionPixels -lt 1000) -or
+			($case.Name.StartsWith("normal") -and $normalPixels -lt 1000) -or
+			($case.Name.StartsWith("depth") -and $depthPixels -lt 1000) -or
+			($case.Name.StartsWith("motion") -and $motionPixels -lt 1000) -or
 			($case.Name -eq "reservoir" -and $historyPixels -lt 1000))
 		{
 			throw ("G-buffer/history/dark image check failed: " + $case.Name)

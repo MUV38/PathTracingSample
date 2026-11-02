@@ -624,7 +624,8 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
-	resizeRestir(constants.mRestirMode > 0 ? static_cast<size_t>(mWidth) * mHeight : 1);
+	const bool needsPrimaryData = constants.mRestirMode > 0 || constants.mRestirDebug > 0;
+	resizeRestir(needsPrimaryData ? static_cast<size_t>(mWidth) * mHeight : 1);
 	const auto& rectangle = lighting.mRectangle;
 	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
 		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
@@ -717,7 +718,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	accumulationBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	accumulationBarrier.UAV.pResource = mAccumulation.Get();
 	commands->ResourceBarrier(1, &accumulationBarrier);
-	if (constants.mRestirMode > 0)
+	if (needsPrimaryData)
 	{
 		D3D12_RESOURCE_BARRIER restirBarrier{};
 		restirBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
@@ -731,12 +732,12 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	commands->DispatchRays(&dispatch);
-	if (constants.mRestirMode > 0)
+	if (needsPrimaryData)
 	{
 		std::swap(mRestirBuffers[0], mRestirBuffers[1]);
 		std::swap(mRestirBuffers[3], mRestirBuffers[4]);
 	}
-	mRestirHistoryValid = constants.mRestirMode > 0;
+	mRestirHistoryValid = needsPrimaryData;
 	const auto position = camera.position();
 	const auto cameraForward = camera.forward();
 	const auto up = camera.up();
