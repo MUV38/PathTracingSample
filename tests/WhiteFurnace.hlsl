@@ -1,6 +1,7 @@
 #include "../samples/UsdKitchen/Pbr.hlsli"
 #include "../samples/UsdKitchen/EnvironmentSampling.hlsli"
 #include "../samples/UsdKitchen/RectangleLight.hlsli"
+#include "../samples/UsdKitchen/MeshLight.hlsli"
 
 struct TestCase
 {
@@ -9,7 +10,7 @@ struct TestCase
 	float roughness;
 	float specular;
 	float noV;
-	uint flags; // 1: cosine reference, 2: MIS, 4: finite rectangle target.
+	uint flags; // 1: cosine reference, 2: MIS, 4: finite rectangle target, 8: lightTriangle mesh sampler.
 };
 struct Result
 {
@@ -24,6 +25,7 @@ struct Result
 };
 StructuredBuffer<TestCase> cases : register(t0);
 StructuredBuffer<float2> environmentDistribution : register(t1);
+StructuredBuffer<MeshLight> meshLights : register(t2);
 RWStructuredBuffer<Result> results : register(u0);
 cbuffer Settings : register(b0)
 {
@@ -62,6 +64,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	rectangle.axisV = float3(0,-1,0);
 	rectangle.width = rectangle.height = 2;
 	rectangle.radiance = 1;
+	bool meshTarget = (input.flags & 8u) != 0;
 	bool rectangleTarget = (input.flags & 4u) != 0;
 	uint state = (group.x + 1u) * 277803737u + (thread + 1u) * 747796405u;
 	float3 sum = 0, sumSquared = 0, reference = 0, referenceSquared = 0;
@@ -110,12 +113,24 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 				evaluateBsdf(surface, view, direction, pdf);
 				float lightPdf = rectangleTarget ? rectanglePdf(rectangle, 0.0f, direction * hitDistance)
 					: environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f);
+				if (meshTarget)
+				{
+					uint lightTriangle = direction.x >= direction.y ? 0u : 1u;
+					lightPdf = meshLightPdf(meshLights[lightTriangle], 0.0f, direction * hitDistance);
+				}
 				weight *= powerHeuristic(pdf, lightPdf);
 			}
 			float lightPdf;
 			float2 lightU = float2(random(state), random(state));
 			float3 light;
-			if (rectangleTarget)
+			if (meshTarget)
+			{
+				MeshLight lightTriangle = meshLights[sampleMeshLightIndex(meshLights, 2, random(state))];
+				float3 lightPoint = sampleMeshLightPoint(lightTriangle, lightU);
+				light = normalize(lightPoint);
+				lightPdf = meshLightPdf(lightTriangle, 0.0f, lightPoint);
+			}
+			else if (rectangleTarget)
 			{
 				float3 lightPoint = sampleRectanglePoint(rectangle, lightU);
 				light = normalize(lightPoint);

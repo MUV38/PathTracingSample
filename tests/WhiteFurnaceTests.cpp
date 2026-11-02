@@ -1,5 +1,6 @@
 #include "SceneFile.h"
 #include "../samples/UsdKitchen/EnvironmentMap.h"
+#include "../samples/UsdKitchen/MeshLight.h"
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -128,7 +129,7 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	{
 		throw std::runtime_error("WhiteFurnaceTests requires Shader Model 6.0.");
 	}
-	D3D12_ROOT_PARAMETER parameters[4]{};
+	D3D12_ROOT_PARAMETER parameters[5]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[0].Descriptor.ShaderRegister = 0;
 	parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
@@ -137,8 +138,10 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	parameters[2].Constants.Num32BitValues = 1;
 	parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[3].Descriptor.ShaderRegister = 1;
+	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[4].Descriptor.ShaderRegister = 2;
 	D3D12_ROOT_SIGNATURE_DESC rootDesc{};
-	rootDesc.NumParameters = 4;
+	rootDesc.NumParameters = 5;
 	rootDesc.pParameters = parameters;
 	ComPtr<ID3DBlob> rootBlob, errors;
 	check(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootBlob, &errors), "Serialize furnace root signature");
@@ -181,6 +184,18 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	check(environment->Map(0, &noRead, &mapped), "Map furnace environment");
 	std::memcpy(mapped, distribution.data(), distributionBytes);
 	environment->Unmap(0, nullptr);
+	const std::vector<SceneVertex> lightVertices{
+		{{-1,-1,2},{0,0,1},{1,1,1}}, {{1,-1,2},{0,0,1},{1,1,1}},
+		{{1,1,2},{0,0,1},{1,1,1}}, {{-1,1,2},{0,0,1},{1,1,1}}};
+	const std::vector<uint32_t> lightIndices{0,1,2,0,2,3};
+	auto meshLights = createMeshLights(lightVertices, lightIndices);
+	SceneMaterial emitter;
+	emitter.mEmissiveColor = {1,1,1};
+	updateMeshLightDistribution(meshLights, {emitter});
+	auto mesh = buffer(device.Get(), meshLights.size() * sizeof(MeshLight), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
+	check(mesh->Map(0, &noRead, &mapped), "Map furnace mesh lights");
+	std::memcpy(mapped, meshLights.data(), meshLights.size() * sizeof(MeshLight));
+	mesh->Unmap(0, nullptr);
 	const size_t bytes = tests.size() * sizeof(Result);
 	auto output = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 	auto readback = buffer(device.Get(), bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -194,6 +209,7 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	commands->SetComputeRootSignature(root.Get());
 	commands->SetComputeRootShaderResourceView(0, input->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(3, environment->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(4, mesh->GetGPUVirtualAddress());
 	commands->SetComputeRootUnorderedAccessView(1, output->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstant(2, samplesPerThread, 0);
 	commands->Dispatch(static_cast<UINT>(tests.size()), 1, 1);
@@ -281,6 +297,13 @@ std::vector<Test> testCases()
 			rectangle.mExpected = {value,value,value};
 		}
 		tests.push_back(rectangle);
+	}
+	for (size_t index = 0; index < environmentCount; ++index)
+	{
+		auto mesh = tests[environmentCount + index];
+		mesh.mData.mFlags |= 8u;
+		mesh.mName = "mesh-" + tests[index].mName;
+		tests.push_back(mesh);
 	}
 	const size_t count = tests.size();
 	for (size_t index = 0; index < count; ++index)

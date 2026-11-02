@@ -7,7 +7,7 @@
 .\tests\RunRectangleLight.ps1 -Configuration Release
 ```
 
-`WhiteFurnaceTests` の352条件を検査し、自作の床・遮蔽物・鏡モデルと白色HDRを生成して、UsdKitchenで9種類の画像を撮影します。
+`WhiteFurnaceTests` の528条件を検査し、自作の床・遮蔽物・鏡モデルと白色HDRを生成して、UsdKitchenで9種類の画像を撮影します。
 出力先はGit管理外の `build/checks/rectangle-<構成>/` です。`-OutputDirectory` で変更できます。
 数値検証はDirectX 12 / SM6.0、表示はDXR Tier 1.1を使います。追加ソフトウェアやUSD SDKは不要です。
 数値テストだけなら `WhiteFurnaceTests.exe <出力先> --warp` でWARPも使えます。
@@ -44,6 +44,6 @@
 不透明な両面の遮蔽物ですが、発光するのは法線側だけです。BRDF反射や透過は持ちません。
 IBLは従来の設定で併用できます。IBLと矩形をそれぞれ1サンプル評価し、各光源へ到達したBRDF経路とのMISを別々に計算します。
 反射回数上限では矩形NEEも打ち切りますが、そこまでに到達した発光面は表示します。
-任意の発光メッシュ、複数の矩形ライト、USDライトの取り込みは今回の対象外です。
+発光メッシュのNEE/MISは [別のテスト](EmissiveLights.md) で検証します。複数の解析的な矩形ライトとUSDライトの取り込みは未対応です。
 
 参考: [PBRT Area Lights](https://pbr-book.org/4ed/Light_Sources/Area_Lights)、[PBRT A Better Path Tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer)

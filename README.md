@@ -14,6 +14,7 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 | SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
 | EnvironmentMapTests | Radiance HDRの復号・向き・不正入力のテスト | GPU / USD SDK不要 |
+| MeshLightTests | 発光三角形の選択分布、編集時の更新、自作描画フィクスチャの生成 | GPU / USD SDK不要 |
 | WhiteFurnaceTests | 実描画と共通のBRDFを白色環境で積分し、エネルギー増加・不正値を検出 | DirectX 12 / SM6.0、WARP可 |
 
 DXRキューブは1個のBLASとTLAS、レイトレーシングPSO、シェーダーテーブルを構築し、
@@ -24,6 +25,8 @@ DxrCubeは単発の一次レイによるDXR入門サンプルです。多重反�
 
 UsdKitchenはmeshletを読み込み、Metallic / Roughness方式のPBR、GGX鏡面反射、ハードシャドウ、複数バウンスの間接照明を描画します。
 矩形面光源1灯によるソフトシャドウと、光源の表示・鏡への映り込みにも対応します。`Rectangle light` パネルから有効にします。
+PBRマテリアルのEmissiveを持つ複数メッシュも、面積と輝度による重点サンプリング、NEE/MISで照明として評価します。
+比較モデルと検証手順は [発光メッシュの説明](tests/EmissiveLights.md) にあります。
 Miss時はIBLを参照します。自作の空マップを既定で使い、Radiance HDRの読み込みにも対応しています。
 IBLは輝度に応じた重点サンプリングとNEEを行い、BRDFサンプリングとMISで統合します。
 ImGuiの `IBL NEE / MIS` または比較用の `--no-ibl-mis` で従来方式へ切り替えられます。

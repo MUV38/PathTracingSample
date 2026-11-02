@@ -10,6 +10,9 @@
 		<ClCompile Include="UsdKitchen.cpp" />
 		<ClCompile Include="MeshRaytracer.cpp" />
 		<ClCompile Include="EnvironmentMap.cpp" />
+		<ClCompile Include="MeshLight.cpp" />
+		<ClInclude Include="MeshLight.h" />
+		<ClInclude Include="MeshLight.hlsli" />
 		<ClInclude Include="UsdKitchen.h" />
 		<ClInclude Include="MeshRaytracer.h" />
 		<ClInclude Include="Lighting.h" />
@@ -22,7 +25,7 @@
 		<CustomBuild Include="Scene.hlsl">
 			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Fo "$(OutDir)Scene.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)Scene.dxil</Outputs>
-			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 			<Message>Compiling converted-mesh DXR shaders</Message>
 		</CustomBuild>
 		<Content Include="$(RepositoryRoot)assets\PreviewRoom.ptscene">

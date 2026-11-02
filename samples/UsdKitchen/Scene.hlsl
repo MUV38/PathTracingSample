@@ -1,6 +1,7 @@
 #include "Pbr.hlsli"
 #include "EnvironmentSampling.hlsli"
 #include "RectangleLight.hlsli"
+#include "MeshLight.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -17,6 +18,7 @@ ByteAddressBuffer meshletTriangles : register(t4);
 Texture2D<float4> environmentMap : register(t5);
 StructuredBuffer<Material> materials : register(t6);
 StructuredBuffer<float2> environmentDistribution : register(t7);
+StructuredBuffer<MeshLight> meshLights : register(t8);
 SamplerState environmentSampler : register(s0);
 RWTexture2D<float4> outputImage : register(u0);
 RWTexture2D<float4> accumulation : register(u1);
@@ -49,6 +51,9 @@ cbuffer SceneConstants : register(b0)
 	uint environmentMis;
 	float2 padding2;
 	RectangleLight rectangle;
+	uint meshLightCount;
+	uint emissiveMis;
+	float2 padding3;
 };
 struct Payload
 {
@@ -58,6 +63,7 @@ struct Payload
 	float3 geometricNormal;
 	uint hit;
 	uint materialIndex;
+	uint triangleIndex;
 };
 static const float pi = 3.14159265359f;
 
@@ -185,6 +191,28 @@ float3 environmentLighting(Surface surface, float3 view, float2 u)
 	}
 	return bsdf * cosine * surface.occlusion * sampleEnvironment(direction) * powerHeuristic(pdf, bsdfPdf) / pdf;
 }
+bool visibleToPoint(Surface surface, float3 lightPoint)
+{
+	RayDesc ray;
+	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
+	float3 shadowDelta = lightPoint - ray.Origin;
+	float distance = length(shadowDelta);
+	ray.Direction = shadowDelta / max(distance, 0.000001f);
+	ray.TMin = 0.0f;
+	ray.TMax = max(0.0f, distance - rayBias(lightPoint));
+	if (rectangleOccludes(ray))
+	{
+		return false;
+	}
+	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
+	query.Proceed();
+	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	{
+		return false;
+	}
+	return true;
+}
 float3 rectangleLighting(Surface surface, float3 view, float2 u)
 {
 	float3 lightPoint = sampleRectanglePoint(rectangle, u);
@@ -207,21 +235,39 @@ float3 rectangleLighting(Surface surface, float3 view, float2 u)
 	{
 		return 0.0f;
 	}
-	RayDesc ray;
-	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
-	float3 shadowDelta = lightPoint - ray.Origin;
-	float distance = length(shadowDelta);
-	ray.Direction = shadowDelta / max(distance, 0.000001f);
-	ray.TMin = 0.0f;
-	ray.TMax = max(0.0f, distance - rayBias(lightPoint));
-	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
-	query.Proceed();
-	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	if (!visibleToPoint(surface, lightPoint))
 	{
 		return 0.0f;
 	}
 	return bsdf * cosine * surface.occlusion * rectangle.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
+}
+float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle)
+{
+	uint index = sampleMeshLightIndex(meshLights, meshLightCount, u.z);
+	if (index == hitTriangle)
+	{
+		return 0.0f;
+	}
+	MeshLight light = meshLights[index];
+	float3 lightPoint = sampleMeshLightPoint(light, u.xy);
+	float pdf = meshLightPdf(light, surface.position, lightPoint);
+	if (pdf <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float3 direction = normalize(lightPoint - surface.position);
+	float cosine = dot(surface.normal, direction);
+	if (cosine <= 0.0f || dot(surface.geometricNormal, direction) <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float bsdfPdf;
+	float3 bsdf = evaluateBsdf(surface, view, direction, bsdfPdf);
+	if (maxComponent(bsdf) <= 0.0f || !visibleToPoint(surface, lightPoint))
+	{
+		return 0.0f;
+	}
+	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
 }
 [shader("raygeneration")]
 void RGSMain()
@@ -296,7 +342,13 @@ void RGSMain()
 				material.emissiveStrength = 0;
 			}
 			float3 view = -ray.Direction;
-			radiance += throughput * (material.emissiveColor * material.emissiveStrength + directLighting(surface, view));
+			float emissionWeight = 1.0f;
+			if (depth > 0 && !previousDelta && emissiveMis != 0 && meshLightCount > 0)
+			{
+				float pdf = meshLightPdf(meshLights[payload.triangleIndex], previousPosition, payload.position);
+				emissionWeight = powerHeuristic(previousBsdfPdf, pdf);
+			}
+			radiance += throughput * (material.emissiveColor * material.emissiveStrength * emissionWeight + directLighting(surface, view));
 			if (depth == maxBounces)
 			{
 				break;
@@ -310,6 +362,11 @@ void RGSMain()
 			{
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * rectangleLighting(surface, view, lightU);
+			}
+			if (emissiveMis != 0 && meshLightCount > 0)
+			{
+				float3 lightU = float3(random(state), random(state), random(state));
+				radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
@@ -401,4 +458,5 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 	payload.color = color;
 	payload.hit = 1;
 	payload.materialIndex = a.materialIndex;
+	payload.triangleIndex = meshlets[meshletIndex].y / 3 + PrimitiveIndex();
 }
