@@ -232,6 +232,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mEnvironmentMis = false;
 			continue;
 		}
+		if (flag == L"--no-multiscattering")
+		{
+			mTracing.mMultipleScattering = false;
+			continue;
+		}
 		if (flag == L"--ibl-intensity" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -277,7 +282,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -639,6 +644,7 @@ void UsdKitchen::drawGui()
 		ImGui::SliderFloat("IBL rotation", &mTracing.mEnvironmentRotation, -180.0f, 180.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
 		ImGui::Checkbox("IBL NEE / MIS", &mTracing.mEnvironmentMis);
 		ImGui::Checkbox("Emissive NEE / MIS", &mTracing.mEmissiveMis);
+		ImGui::Checkbox("GGX multiple scattering", &mTracing.mMultipleScattering);
 		ImGui::Text("Emissive triangles: %u (two-sided)", mRaytracer.emissiveTriangleCount());
 		ImGui::TextWrapped("IBL: %s", mEnvironmentName.c_str());
 		try

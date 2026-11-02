@@ -1,4 +1,5 @@
 #include "MeshRaytracer.h"
+#include "GgxEnergyLut.h"
 #include "Renderer.h"
 #include "Sample.h"
 
@@ -96,7 +97,8 @@ struct SceneConstants
 	uint32_t mRectangleMis = 1;
 	uint32_t mMeshLightCount = 0;
 	uint32_t mEmissiveMis = 1;
-	std::array<float,2> mPadding3{};
+	uint32_t mMultipleScattering = 1;
+	float mPadding3 = 0;
 };
 static_assert(sizeof(SceneConstants) == 64 * sizeof(float));
 }
@@ -112,6 +114,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 	}
 	createPipeline();
 	createShaderTable();
+	mGgxEnergy = uploadBuffer(mDevice.Get(), ggxEnergyLut.data(), sizeof(ggxEnergyLut));
 	mConstants = createBuffer(mDevice.Get(), 256, D3D12_HEAP_TYPE_UPLOAD,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
@@ -399,7 +402,7 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[11]{};
+	D3D12_ROOT_PARAMETER parameters[12]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -424,6 +427,8 @@ void MeshRaytracer::createPipeline()
 	parameters[9].Descriptor.ShaderRegister = 7;
 	parameters[10].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[10].Descriptor.ShaderRegister = 8;
+	parameters[11].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[11].Descriptor.ShaderRegister = 9;
 	D3D12_STATIC_SAMPLER_DESC sampler{};
 	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -579,6 +584,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mEnvironmentMis = tracing.mEnvironmentMis ? 1u : 0u;
 	constants.mMeshLightCount = mEmissiveTriangleCount > 0 ? static_cast<uint32_t>(mMeshLightData.size()) : 0;
 	constants.mEmissiveMis = tracing.mEmissiveMis && !meshletColors ? 1u : 0u;
+	constants.mMultipleScattering = tracing.mMultipleScattering ? 1u : 0u;
 	const auto& rectangle = lighting.mRectangle;
 	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
 		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
@@ -636,6 +642,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(10, mMeshLights->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(11, mGgxEnergy->GetGPUVirtualAddress());
 	// SampleFramework has waited for the previous frame before this upload is reused.
 	void* mappedConstants = nullptr;
 	const D3D12_RANGE noRead{0, 0};

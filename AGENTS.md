@@ -19,6 +19,7 @@ UsdKitchenの間接照明・IBLを確認するときは `--samples 128 --screens
 IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapTests.exe build/checks` を実行すること
 IBLのサンプリング分布・NEE・MISを変更した場合もEnvironmentMapTestsとRunWhiteFurnaceを両構成で実行し、`--no-ibl-mis` と同じサンプル数で画像を比較すること
 UsdKitchenのBRDF評価・サンプリングを変更した場合はDebug / Releaseの `tests/RunWhiteFurnace.ps1 -Configuration <構成>` を実行し、出力PNGも確認すること。判定範囲と許容誤差は `tests/WhiteFurnace.md` を参照すること
+GGXのD・Smith visibility・粗さの定義を変更した場合は `tools/GgxEnergyLut/README.md` の手順でエネルギーLUTも再生成すること。補償あり／なしの白い粗面金属・色付き金属・非金属をWhiteFurnaceで検証すること
 矩形面光源の交差判定・PDF・NEE/MISを変更した場合はDebug / Releaseの `tests/RunRectangleLight.ps1 -Configuration <構成>` を実行すること。保存PNGを開き、大小ライトの半影、表裏、鏡への映り込みも確認すること。手順は `tests/RectangleLight.md` を参照すること
 発光メッシュの選択分布・PDF・NEE/MISを変更した場合はDebug / Releaseの `MeshLightTests.exe <出力先>`、`tests/RunEmissiveLights.ps1 -Configuration <構成>`、WhiteFurnaceTestsを実行し、複数色の照明・影・鏡の保存画像も確認すること。手順は `tests/EmissiveLights.md` を参照すること
 

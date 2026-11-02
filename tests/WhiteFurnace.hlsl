@@ -11,7 +11,7 @@ struct TestCase
 	float roughness;
 	float specular;
 	float noV;
-	uint flags; // 1: cosine reference, 2: MIS, 4: rectangle, 8: mesh sampler, 16: legacy NDF.
+	uint flags; // 1: cosine reference, 2: MIS, 4: rectangle, 8: mesh sampler, 16: NDF, 32: single scattering.
 };
 struct Result
 {
@@ -59,6 +59,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	surface.specular = input.specular;
 	surface.occlusion = 1;
 	surface.useNdf = (input.flags & 16u) != 0;
+	surface.singleScatterOnly = (input.flags & 32u) != 0;
 	float3 view = float3(sqrt(1.0f - input.noV * input.noV), 0, input.noV);
 	RectangleLight rectangle = (RectangleLight)0;
 	rectangle.center = float3(0,0,2);
@@ -92,6 +93,17 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	{
 		float3 direction, weight;
 		float3 u = float3(random(state), random(state), random(state));
+		if (index == 0)
+		{
+			float3 probe = normalize(float3(0.3f, 0.4f, 0.5f));
+			float unusedPdf;
+			float3 forward = evaluateBsdf(surface, view, probe, unusedPdf);
+			float3 backward = evaluateBsdf(surface, probe, view, unusedPdf);
+			if (any(abs(forward - backward) > 0.0001f * max(1.0f, abs(forward))))
+			{
+				++invalid;
+			}
+		}
 		bool accepted = sampleBsdf(surface, view, u, direction, weight);
 		if (any(!isfinite(weight)) || any(weight < 0.0f)
 			|| (accepted && (any(!isfinite(direction)) || abs(dot(direction, direction) - 1.0f) > 0.001f)))

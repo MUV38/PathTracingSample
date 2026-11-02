@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals"><ProjectGuid>{8D8E5C83-DF51-405F-BFD9-4AE9F98F5065}</ProjectGuid></PropertyGroup>
+	<Import Project="..\..\build_support\Cpp.props" />
+	<ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+	<ItemGroup><ClCompile Include="Main.cpp" /></ItemGroup>
+	<Import Project="..\..\build_support\Cpp.targets" />
+</Project>

@@ -34,13 +34,26 @@ if ($LASTEXITCODE -ne 0)
 
 Add-Type -AssemblyName System.Drawing
 $summary = @()
-foreach ($fixture in @("mirror", "diffuse", "absorber"))
+foreach ($fixture in @("mirror", "rough-metal", "rough-bsdf", "rough-single", "diffuse", "absorber"))
 {
-	$model = Join-Path $outputPath ($fixture + ".ptscene")
+	$modelName = $fixture
+	if ($fixture -eq "rough-bsdf" -or $fixture -eq "rough-single")
+	{
+		$modelName = "rough-metal"
+	}
+	$model = Join-Path $outputPath ($modelName + ".ptscene")
 	$environment = Join-Path $outputPath "white.hdr"
 	$png = Join-Path $outputPath ($fixture + ".png")
 	$stderr = Join-Path $outputPath ($fixture + ".stderr.txt")
 	$arguments = '--model "{0}" --ibl "{1}" --light-strength 0 --ambient 0 --ibl-intensity 1 --bounces 1 --spp 4 --samples 128 --screenshot "{2}"' -f $model, $environment, $png
+	if ($fixture -eq "rough-bsdf")
+	{
+		$arguments += ' --no-ibl-mis'
+	}
+	if ($fixture -eq "rough-single")
+	{
+		$arguments += ' --no-multiscattering'
+	}
 	$process = Start-Process -FilePath $viewerExe -ArgumentList $arguments -WorkingDirectory $repository -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
 	if (!$process.WaitForExit(45000))
 	{
@@ -56,6 +69,7 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 	{
 		$white = 0
 		$black = 0
+		$dark = 0
 		$wrong = 0
 		$errorSum = 0.0
 		$squaredError = 0.0
@@ -66,6 +80,10 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 			for ($x = $startX; $x -lt $bitmap.Width; $x += 2)
 			{
 				$pixel = $bitmap.GetPixel($x, $y)
+				if ($pixel.R -lt 170 -and $pixel.G -lt 170 -and $pixel.B -lt 170)
+				{
+					$dark++
+				}
 				foreach ($channel in @($pixel.R, $pixel.G, $pixel.B))
 				{
 					$delta = [double]$channel - 188
@@ -89,7 +107,14 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 		}
 		$meanError = $errorSum / $channels
 		$rmse = [Math]::Sqrt($squaredError / $channels)
-		if ($fixture -eq "absorber")
+		if ($fixture -eq "rough-single")
+		{
+			if ($dark -lt 1000 -or $white -lt 1000)
+			{
+				throw "Single-scattering rough metal must show energy loss against the white environment."
+			}
+		}
+		elseif ($fixture -eq "absorber")
 		{
 			if ($black -lt 1000 -or $white -lt 1000)
 			{
@@ -100,7 +125,7 @@ foreach ($fixture in @("mirror", "diffuse", "absorber"))
 		{
 			throw "$fixture must match the unit-radiance environment: mean error=$meanError, RMSE=$rmse."
 		}
-		$summary += [pscustomobject]@{ Fixture = $fixture; WhiteSamples = $white; BlackSamples = $black; OtherSamples = $wrong - $black; MeanError = $meanError; Rmse = $rmse; Png = $png }
+		$summary += [pscustomobject]@{ Fixture = $fixture; WhiteSamples = $white; BlackSamples = $black; DarkSamples = $dark; OtherSamples = $wrong - $black; MeanError = $meanError; Rmse = $rmse; Png = $png }
 		Write-Output "$fixture image passed: white=$white black=$black"
 	}
 	finally

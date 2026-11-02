@@ -53,7 +53,8 @@ cbuffer SceneConstants : register(b0)
 	RectangleLight rectangle;
 	uint meshLightCount;
 	uint emissiveMis;
-	float2 padding3;
+	uint multipleScattering;
+	float padding3;
 };
 struct Payload
 {
@@ -324,6 +325,7 @@ void RGSMain()
 			}
 			Material material = materials[payload.materialIndex];
 			Surface surface;
+			surface.singleScatterOnly = multipleScattering == 0;
 			surface.position = payload.position;
 			surface.normal = payload.normal;
 			surface.geometricNormal = payload.geometricNormal;
