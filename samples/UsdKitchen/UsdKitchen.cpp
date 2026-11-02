@@ -92,9 +92,14 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	for (size_t index = 0; index < arguments.size(); ++index)
 	{
 		const auto& flag = arguments[index];
+		if (flag == L"--meshlet-colors")
+		{
+			mMeshletColors = true;
+			continue;
+		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model <scene.ptscene> OR --usd <source.usd>, optional --converter <UsdConverter.exe>.");
+			throw std::runtime_error("UsdKitchen options: --model <scene.ptscene> OR --usd <source.usd>, optional --converter <UsdConverter.exe> and --meshlet-colors.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -146,6 +151,8 @@ void UsdKitchen::loadModel(const std::filesystem::path& path)
 	auto scene = readSceneFile(path);
 	mRaytracer.load(*mRenderer, scene);
 	mHeader = scene.mHeader;
+	mTriangleCount = scene.mMeshletTriangles.size() / 3;
+	mMeshletCount = scene.mMeshlets.size();
 	mModelPath = path;
 	mHasScene = true;
 	mFocusPoint = {(mHeader.mMinimum[0] + mHeader.mMaximum[0]) * 0.5f,
@@ -350,8 +357,10 @@ void UsdKitchen::drawGui()
 	ImGui::TextWrapped("%s", mStatus.c_str());
 	if (mHasScene)
 	{
-		ImGui::Text("%llu triangles / %llu mesh occurrences", static_cast<unsigned long long>(mHeader.mVertexCount / 3),
+		ImGui::Text("%llu triangles / %llu mesh occurrences", static_cast<unsigned long long>(mTriangleCount),
 			static_cast<unsigned long long>(mHeader.mMeshCount));
+		ImGui::Text("%zu meshlets / %llu unique vertices", mMeshletCount, static_cast<unsigned long long>(mHeader.mVertexCount));
+		ImGui::Checkbox("Meshlet colors", &mMeshletColors);
 	}
 	if (ImGui::CollapsingHeader("Conversion log"))
 	{
@@ -381,6 +390,6 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 {
 	if (mHasScene)
 	{
-		mRaytracer.render(renderer, mCamera, mViewportLeft, mHeadlight, mExposure, commands, backBuffer);
+		mRaytracer.render(renderer, mCamera, mViewportLeft, mHeadlight, mExposure, mMeshletColors, commands, backBuffer);
 	}
 }

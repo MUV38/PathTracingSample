@@ -1,4 +1,5 @@
 #include "SceneFile.h"
+#include "MeshletBuilder.h"
 
 #include <pxr/pxr.h>
 #include <pxr/base/gf/vec2d.h>
@@ -400,7 +401,9 @@ int wmain(int argumentCount, wchar_t** arguments)
 		}
 		Converter converter;
 		auto scene = converter.convert(stage);
+		buildSceneMeshlets(scene);
 		writeSceneFile(arguments[2], scene);
+		std::printf("Built %zu spatial meshlets (up to %u vertices / %u triangles).\n", scene.mMeshlets.size(), sceneMeshletMaxVertices, sceneMeshletMaxTriangles);
 		std::printf("Wrote %s (%llu vertices).\n", utf8(arguments[2]).c_str(), static_cast<unsigned long long>(scene.mVertices.size()));
 		return 0;
 	}

@@ -37,7 +37,7 @@
 			<ConformanceMode>true</ConformanceMode>
 			<ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
 			<AdditionalOptions>/utf-8 /external:I "$(UsdSdkRoot)\include" %(AdditionalOptions)</AdditionalOptions>
-			<AdditionalIncludeDirectories>$(RepositoryRoot)common;$(UsdSdkRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+			<AdditionalIncludeDirectories>$(RepositoryRoot)common;$(RepositoryRoot)third_party\meshoptimizer\src;$(UsdSdkRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
 			<PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;TBB_SUPPRESS_DEPRECATED_MESSAGES=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
 		</ClCompile>
 		<Link>
@@ -49,6 +49,11 @@
 	</ItemDefinitionGroup>
 	<ItemGroup>
 		<ClCompile Include="Main.cpp" />
+		<ClCompile Include="MeshletBuilder.cpp" />
+		<ClInclude Include="MeshletBuilder.h" />
+		<ClCompile Include="$(RepositoryRoot)third_party\meshoptimizer\src\allocator.cpp" />
+		<ClCompile Include="$(RepositoryRoot)third_party\meshoptimizer\src\indexgenerator.cpp" />
+		<ClCompile Include="$(RepositoryRoot)third_party\meshoptimizer\src\clusterizer.cpp" />
 		<ClCompile Include="$(RepositoryRoot)common\SceneFile.cpp" />
 		<ClInclude Include="$(RepositoryRoot)common\SceneFile.h" />
 	</ItemGroup>

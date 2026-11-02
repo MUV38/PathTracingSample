@@ -32,11 +32,14 @@ private:
 	Camera mCamera;
 	CameraController mController;
 	SceneHeader mHeader;
+	size_t mTriangleCount = 0;
+	size_t mMeshletCount = 0;
 	DirectX::XMFLOAT3 mFocusPoint{};
 	float mRadius = 1.0f;
 	float mViewportLeft = 0.0f;
 	float mExposure = 1.0f;
 	bool mHeadlight = true;
+	bool mMeshletColors = false;
 	bool mHasScene = false;
 	bool mStartupConversion = false;
 	bool mNeedsFrame = false;

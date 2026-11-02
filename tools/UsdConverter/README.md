@@ -21,30 +21,54 @@ SDKのランタイムDLLとプラグインリソースをツールの出力先�
 変換に失敗した場合は終了コード1で理由を出力し、既存の出力ファイルを維持します。
 対応範囲は [表示サンプル](../../samples/UsdKitchen/README.md) を参照してください。
 
-## 独自形式 v1
+## meshletへの分割
 
-little-endian、IEEE754 float32。右手系Y-up、ワールド座標、メートル単位、非インデックス三角形リストです。
+同梱meshoptimizer v1.3の必要なC++ソースを直接コンパイルします。追加のインストールは不要です。
+位置・法線・色の36バイト全体で頂点を重複除去し、`meshopt_buildMeshletsSpatial` でレイトレーシング向けに分割します。
+最大64頂点・126三角形、目標最小32三角形、fill_weight 0.5です。小さい形状や頂点数の制限によって32三角形未満にもなります。
+上限は [NVIDIA公式のmeshlet推奨値](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/) に合わせています。Mesh Shader向けの推奨値を採用したもので、CLASでの最適サイズは別途評価が必要です。
+分割はワールド空間へ展開したシーン全体を対象とします。LOD、階層クラスタ、カリングはまだ生成しません。
+
+## 独自形式 v2（meshlet専用）
+
+little-endian、IEEE754 float32。右手系Y-up、ワールド座標、メートル単位です。
 構造体と読み書きの共通定義は `common/SceneFile.h/.cpp` です。USDには依存しません。
+v1は読み書きとも未対応です。古い変換結果はUSDから再生成してください。
 
 | オフセット | 型 | 内容 |
 | --- | --- | --- |
-| 0 | char[8] | `PTUSDM01` |
-| 8 | uint32 | バージョン1 |
+| 0 | char[8] | `PTUSDM02` |
+| 8 | uint32 | バージョン2 |
 | 12 | uint32 | 頂点サイズ36 |
-| 16 | uint64 | 頂点数（三角形数×3） |
+| 16 | uint64 | 共有頂点数 |
 | 24 | uint64 | メッシュ出現数 |
 | 32 | float[3] | 最小座標 |
 | 44 | float[3] | 最大座標 |
-| 56 | uint64 | 頂点ペイロードのFNV-1a 64bit |
-| 64 | 頂点配列 | 各頂点はposition float3、normal float3、color float3 |
+| 56 | uint64 | 全ペイロードのFNV-1a 64bit |
+| 64 | uint64 | meshlet数 |
+| 72 | uint64 | 頂点参照数 |
+| 80 | uint64 | ローカル三角形インデックスのバイト数（三角形数×3） |
+| 88 | 配列 | 以下の4配列を順に保存 |
 
-空シーン、3000万頂点超、不正バージョン、長さ不一致、非有限値、ゼロ法線、チェックサム不一致は拒否します。
+ペイロードの順序:
+
+1. 共有頂点（36バイト）: position float3、normal float3、color float3。
+2. meshlet（16バイト）: vertexOffset、triangleOffset、vertexCount、triangleCount（すべてuint32）。
+3. 頂点参照（uint32）: 共有頂点配列へのインデックス。
+4. ローカル三角形インデックス（uint8）: 各meshlet内の頂点番号。3個で1三角形、パディングなし。
+
+vertexOffsetは頂点参照配列の要素位置、triangleOffsetはuint8配列のバイト位置です。
+各meshletの範囲は隙間なく並べ、ローカル番号はvertexCount未満、頂点参照は共有頂点数未満にします。
+チェックサムはこの4配列の連結全体を対象とします。
+
+空シーン、3000万頂点・参照・ローカルインデックス超、不正バージョン、長さ不一致、非有限値、ゼロ法線、範囲外の参照、不正なmeshlet範囲、チェックサム不一致は拒否します。
 出力は同じフォルダの一時ファイルから置換します。
 
 ## 検証
 
 メインソリューションのSceneFileTestsはUSD SDK不要です。自作の凹多角形を変換した結果も追加引数で検証できます。
 階層変換、cmからmへの変換、Z-upからY-upへの変換、法線、indexed displayColor、三角形の面積を確認します。
+共有頂点を持つグリッドの分割、三角形・向き・法線・色の保存、meshlet上限・インデックス不正の拒否、旧形式の拒否もテストします。
 
 ```powershell
 .\build\x64\Release\UsdConverter\UsdConverter.exe tests/ConversionFixture.usda build/checks/conversion.ptscene
