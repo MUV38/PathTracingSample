@@ -3,6 +3,28 @@
 	metersPerUnit = 1
 	upAxis = "Y")
 def Xform "PreviewRoom" {
+	def Scope "Looks" {
+		def Material "BlueMetal" {
+			token outputs:surface.connect = </PreviewRoom/Looks/BlueMetal/Shader.outputs:surface>
+			def Shader "Shader" {
+				uniform token info:id = "UsdPreviewSurface"
+				color3f inputs:diffuseColor = (0.35, 0.65, 0.8)
+				float inputs:metallic = 1
+				float inputs:roughness = 0.18
+				token outputs:surface
+			}
+		}
+		def Material "Mirror" {
+			token outputs:surface.connect = </PreviewRoom/Looks/Mirror/Shader.outputs:surface>
+			def Shader "Shader" {
+				uniform token info:id = "UsdPreviewSurface"
+				color3f inputs:diffuseColor = (0.95, 0.95, 0.95)
+				float inputs:metallic = 1
+				float inputs:roughness = 0
+				token outputs:surface
+			}
+		}
+	}
 	def Xform "Floor" (prepend references = @UnitCube.usda@
 	instanceable = true) {
 		double3 xformOp:translate = (0, -0.1, 0)
@@ -32,14 +54,18 @@ def Xform "PreviewRoom" {
 		color3f[] primvars:displayColor = [(0.52, 0.32, 0.16)] (interpolation = "constant")
 	}
 	def Xform "CounterTop" (prepend references = @UnitCube.usda@
-	instanceable = true) {
+	instanceable = true
+	prepend apiSchemas = ["MaterialBindingAPI"]) {
+		rel material:binding = </PreviewRoom/Looks/Mirror>
 		double3 xformOp:translate = (-0.5, 1.04, -2)
 		float3 xformOp:scale = (4.7, 0.08, 1)
 		uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
 		color3f[] primvars:displayColor = [(0.8, 0.8, 0.76)] (interpolation = "constant")
 	}
 	def Xform "Fridge" (prepend references = @UnitCube.usda@
-	instanceable = true) {
+	instanceable = true
+	prepend apiSchemas = ["MaterialBindingAPI"]) {
+		rel material:binding = </PreviewRoom/Looks/BlueMetal>
 		double3 xformOp:translate = (2.1, 1.1, -1.9)
 		float3 xformOp:scale = (1, 2.2, 1)
 		uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]

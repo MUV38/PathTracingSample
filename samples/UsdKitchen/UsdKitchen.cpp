@@ -102,6 +102,29 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mLighting.mShadows = false;
 			continue;
 		}
+		if ((flag == L"--metallic" || flag == L"--roughness" || flag == L"--specular") && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const float number = std::stof(value, &consumed);
+			if (consumed != value.size() || !std::isfinite(number) || number < 0 || number > 1)
+			{
+				throw std::runtime_error("Metallic, roughness and specular must be 0..1.");
+			}
+			if (flag == L"--metallic")
+			{
+				mOverrideMetallic = number;
+			}
+			else if (flag == L"--roughness")
+			{
+				mOverrideRoughness = number;
+			}
+			else
+			{
+				mOverrideSpecular = number;
+			}
+			continue;
+		}
 		if ((flag == L"--bounces" || flag == L"--spp" || flag == L"--samples") && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -172,7 +195,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -231,7 +254,24 @@ void UsdKitchen::initialize(Renderer& renderer)
 void UsdKitchen::loadModel(const std::filesystem::path& path)
 {
 	auto scene = readSceneFile(path);
+	for (auto& material : scene.mMaterials)
+	{
+		if (mOverrideMetallic)
+		{
+			material.mMetallic = *mOverrideMetallic;
+		}
+		if (mOverrideRoughness)
+		{
+			material.mRoughness = *mOverrideRoughness;
+		}
+		if (mOverrideSpecular)
+		{
+			material.mSpecular = *mOverrideSpecular;
+		}
+	}
 	mRaytracer.load(*mRenderer, scene);
+	mMaterials = scene.mMaterials;
+	mSelectedMaterial = 0;
 	mHeader = scene.mHeader;
 	mTriangleCount = scene.mMeshletTriangles.size() / 3;
 	mMeshletCount = scene.mMeshlets.size();
@@ -457,12 +497,45 @@ void UsdKitchen::drawGui()
 		frameModel();
 	}
 	ImGui::SliderFloat("Exposure", &mExposure, 0.1f, 3.0f);
+	if (!mMaterials.empty() && ImGui::CollapsingHeader("PBR material"))
+	{
+		ImGui::SliderInt("Material", &mSelectedMaterial, 0, static_cast<int>(mMaterials.size()) - 1, "%d", ImGuiSliderFlags_AlwaysClamp);
+		mSelectedMaterial = std::clamp(mSelectedMaterial, 0, static_cast<int>(mMaterials.size()) - 1);
+		auto material = mMaterials[mSelectedMaterial];
+		bool changed = ImGui::ColorEdit3("Base Color (linear)", material.mBaseColor.data(), ImGuiColorEditFlags_Float);
+		changed |= ImGui::SliderFloat("Metallic", &material.mMetallic, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		changed |= ImGui::SliderFloat("Roughness", &material.mRoughness, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		changed |= ImGui::SliderFloat("Specular", &material.mSpecular, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		changed |= ImGui::SliderFloat("Ambient Occlusion", &material.mOcclusion, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		changed |= ImGui::ColorEdit3("Emissive Color", material.mEmissiveColor.data(), ImGuiColorEditFlags_Float);
+		changed |= ImGui::SliderFloat("Emissive Strength", &material.mEmissiveStrength, 0, 100000, "%.3f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::TextWrapped("Base Color multiplies vertex color. Roughness 0 is a mirror. Specular 0.5 gives dielectric F0 of 4%%.");
+		if (ImGui::Button("Reset material"))
+		{
+			material = SceneMaterial{};
+			changed = true;
+		}
+		if (changed)
+		{
+			try
+			{
+				auto replacement = mMaterials;
+				replacement[mSelectedMaterial] = material;
+				mRaytracer.updateMaterials(*mRenderer, replacement);
+				mMaterials = std::move(replacement);
+			}
+			catch (const std::exception& error)
+			{
+				mStatus = error.what();
+			}
+		}
+	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::Text("Accumulated samples: %llu", static_cast<unsigned long long>(mRaytracer.accumulatedSamples()));
 		int bounces = static_cast<int>(mTracing.mMaxBounces);
 		int samples = static_cast<int>(mTracing.mSamplesPerFrame);
-		ImGui::SliderInt("Diffuse bounces", &bounces, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderInt("Path bounces", &bounces, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderInt("Samples per frame", &samples, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
 		mTracing.mMaxBounces = static_cast<uint32_t>(std::clamp(bounces, 0, 8));
 		mTracing.mSamplesPerFrame = static_cast<uint32_t>(std::clamp(samples, 1, 16));

@@ -21,6 +21,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <set>
@@ -150,27 +151,83 @@ GfVec3f samplePrimvar(const VtVec3fArray& values, const TfToken& interpolation, 
 	return index < values.size() ? values[index] : fallback;
 }
 
-std::optional<GfVec3f> materialColor(const UsdPrim& prim, UsdTimeCode time)
+struct MaterialBinding
 {
-	const UsdShadeMaterial material = UsdShadeMaterialBindingAPI(prim).ComputeBoundMaterial();
-	if (!material)
-	{
-		return std::nullopt;
-	}
+	uint32_t mIndex = 0;
+	bool mHasBaseColor = false;
+};
+
+SceneMaterial readMaterial(const UsdShadeMaterial& material, UsdTimeCode time, bool& hasBaseColor)
+{
+	SceneMaterial result;
 	const UsdShadeShader shader = material.ComputeSurfaceSource();
-	if (shader)
+	if (!shader)
 	{
-		for (const char* inputName : {"diffuseColor", "baseColor"})
+		return result;
+	}
+	const auto scalar = [&](const char* name, float fallback)
+	{
+		float value = fallback;
+		const auto input = shader.GetInput(TfToken(name));
+		if (input)
 		{
-			GfVec3f color;
-			const auto input = shader.GetInput(TfToken(inputName));
-			if (input && input.Get(&color, time))
-			{
-				return color;
-			}
+			input.Get(&value, time);
+		}
+		if (!std::isfinite(value))
+		{
+			throw std::runtime_error("USD material contains a non-finite scalar.");
+		}
+		return value;
+	};
+	int specularWorkflow = 0;
+	if (const auto input = shader.GetInput(TfToken("useSpecularWorkflow")))
+	{
+		input.Get(&specularWorkflow, time);
+	}
+	if (specularWorkflow != 0)
+	{
+		throw std::runtime_error("USD specular workflow is unsupported; use metallic/roughness: " + material.GetPath().GetString());
+	}
+	GfVec3f baseColor(1), emissive(0);
+	for (const char* name : {"diffuseColor", "baseColor"})
+	{
+		const auto input = shader.GetInput(TfToken(name));
+		if (input && input.Get(&baseColor, time))
+		{
+			hasBaseColor = true;
+			break;
 		}
 	}
-	return std::nullopt;
+	if (const auto input = shader.GetInput(TfToken("emissiveColor")))
+	{
+		input.Get(&emissive, time);
+	}
+	for (size_t axis = 0; axis < 3; ++axis)
+	{
+		if (!std::isfinite(baseColor[axis]) || !std::isfinite(emissive[axis]))
+		{
+			throw std::runtime_error("USD material contains a non-finite color.");
+		}
+		result.mBaseColor[axis] = std::clamp(baseColor[axis], 0.0f, 1.0f);
+		emissive[axis] = (std::max)(0.0f, emissive[axis]);
+		result.mEmissiveStrength = (std::max)(result.mEmissiveStrength, emissive[axis]);
+	}
+	for (size_t axis = 0; axis < 3; ++axis)
+	{
+		result.mEmissiveColor[axis] = emissive[axis] / result.mEmissiveStrength;
+	}
+	result.mMetallic = std::clamp(scalar("metallic", 0.0f), 0.0f, 1.0f);
+	result.mRoughness = std::clamp(scalar("roughness", 0.5f), 0.0f, 1.0f);
+	result.mOcclusion = std::clamp(scalar("occlusion", 1.0f), 0.0f, 1.0f);
+	const float ior = scalar("ior", 1.5f);
+	if (ior < 1.0f)
+	{
+		throw std::runtime_error("USD material IOR must be at least 1.");
+	}
+	const float ratio = (ior - 1.0f) / (ior + 1.0f);
+	result.mSpecular = std::clamp(ratio * ratio / 0.08f, 0.0f, 1.0f);
+	validateSceneMaterials({result});
+	return result;
 }
 
 class Converter final
@@ -218,11 +275,34 @@ public:
 		{
 			std::printf("Note: %zu subdivision meshes exported as their polygon control cages (no subdivision evaluation).\n", mSubdivisionMeshes);
 		}
-		std::puts("Static mesh preview: colors use displayColor or constant diffuse/base color; texture/shader networks, animation and transparency are not baked.");
+		std::printf("Exported %zu PBR materials (constant metallic/roughness, IOR, occlusion, emission).\n", mScene.mMaterials.size());
+		std::puts("Static preview: texture/shader networks, animation and transparency are not baked.");
 		return std::move(mScene);
 	}
 
 private:
+	MaterialBinding materialBinding(const UsdPrim& prim)
+	{
+		const auto material = UsdShadeMaterialBindingAPI(prim).ComputeBoundMaterial();
+		if (!material)
+		{
+			return {};
+		}
+		const auto key = material.GetPath().GetString();
+		if (const auto found = mMaterialBindings.find(key); found != mMaterialBindings.end())
+		{
+			return found->second;
+		}
+		if (mScene.mMaterials.size() >= 65536)
+		{
+			throw std::runtime_error("Scene exceeds the 65536-material limit.");
+		}
+		MaterialBinding binding{static_cast<uint32_t>(mScene.mMaterials.size()), false};
+		mScene.mMaterials.push_back(readMaterial(material, mTime, binding.mHasBaseColor));
+		mMaterialBindings.emplace(key, binding);
+		return binding;
+	}
+
 	GfVec3d yUp(const GfVec3d& value) const
 	{
 		return mZUp ? GfVec3d(value[0], value[2], -value[1]) : value;
@@ -274,8 +354,8 @@ private:
 		{
 			mesh.GetNormalsAttr().Get(&normals, mTime);
 		}
-		const auto boundColor = materialColor(mesh.GetPrim(), mTime);
-		std::vector<std::optional<GfVec3f>> faceColors(counts.size(), boundColor);
+		const auto boundMaterial = materialBinding(mesh.GetPrim());
+		std::vector<MaterialBinding> faceMaterials(counts.size(), boundMaterial);
 		for (const auto& child : mesh.GetPrim().GetChildren())
 		{
 			const UsdGeomSubset subset(child);
@@ -285,16 +365,16 @@ private:
 			}
 			TfToken elementType;
 			subset.GetElementTypeAttr().Get(&elementType, mTime);
-			const auto color = materialColor(child, mTime);
-			if (elementType == UsdGeomTokens->face && color)
+			const auto binding = materialBinding(child);
+			if (elementType == UsdGeomTokens->face && binding.mIndex != 0)
 			{
 				VtIntArray faces;
 				subset.GetIndicesAttr().Get(&faces, mTime);
 				for (const int face : faces)
 				{
-					if (face >= 0 && static_cast<size_t>(face) < faceColors.size())
+					if (face >= 0 && static_cast<size_t>(face) < faceMaterials.size())
 					{
-						faceColors[face] = color;
+						faceMaterials[face] = binding;
 					}
 				}
 			}
@@ -343,8 +423,10 @@ private:
 					{
 						normal = faceNormal;
 					}
-					const GfVec3f color = faceColors[face].value_or(samplePrimvar(colors, colorInterpolation, face, pointIndex, offset + corner, GfVec3f(0.65f)));
+					const GfVec3f color = faceMaterials[face].mHasBaseColor ? GfVec3f(1)
+						: samplePrimvar(colors, colorInterpolation, face, pointIndex, offset + corner, GfVec3f(0.65f));
 					SceneVertex vertex;
+					vertex.mMaterialIndex = faceMaterials[face].mIndex;
 					for (size_t axis = 0; axis < 3; ++axis)
 					{
 						vertex.mPosition[axis] = static_cast<float>(facePoints[corner][axis]);
@@ -371,6 +453,7 @@ private:
 	}
 
 	SceneData mScene;
+	std::map<std::string, MaterialBinding> mMaterialBindings;
 	UsdTimeCode mTime;
 	UsdGeomXformCache mTransforms;
 	bool mZUp = false;

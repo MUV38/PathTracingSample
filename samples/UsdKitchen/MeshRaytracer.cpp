@@ -110,10 +110,14 @@ void MeshRaytracer::initialize(Renderer& renderer)
 
 void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 {
+	validateSceneMaterials(scene.mMaterials);
 	// Keep the old scene alive until the replacement has finished building.
 	const UINT64 byteSize = scene.mVertices.size() * sizeof(SceneVertex);
 	auto staging = uploadBuffer(mDevice.Get(), scene.mVertices.data(), static_cast<size_t>(byteSize));
 	auto vertices = createBuffer(mDevice.Get(), byteSize, D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	auto materialStaging = uploadBuffer(mDevice.Get(), scene.mMaterials.data(), scene.mMaterials.size() * sizeof(SceneMaterial));
+	auto materials = createBuffer(mDevice.Get(), scene.mMaterials.size() * sizeof(SceneMaterial), D3D12_HEAP_TYPE_DEFAULT,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
 	const auto triangleIndices = meshletTriangleIndices(scene);
 	auto indexStaging = uploadBuffer(mDevice.Get(), triangleIndices.data(), triangleIndices.size() * sizeof(uint32_t));
@@ -182,6 +186,7 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	check(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
 		IID_PPV_ARGS(&commands)), "Create scene command list");
 	commands->CopyResource(vertices.Get(), staging.Get());
+	commands->CopyResource(materials.Get(), materialStaging.Get());
 	commands->CopyResource(indices.Get(), indexStaging.Get());
 	commands->CopyResource(meshlets.Get(), meshletStaging.Get());
 	commands->CopyResource(references.Get(), referenceStaging.Get());
@@ -190,6 +195,8 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition = {vertices.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 		D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = materials.Get();
 	commands->ResourceBarrier(1, &barrier);
 	barrier.Transition.pResource = indices.Get();
 	commands->ResourceBarrier(1, &barrier);
@@ -217,12 +224,43 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	renderer.commandQueue()->ExecuteCommandLists(1, lists);
 	renderer.waitForGpu();
 	mVertices = std::move(vertices);
+	mMaterials = std::move(materials);
+	mMaterialCount = scene.mMaterials.size();
 	mIndices = std::move(indices);
 	mMeshlets = std::move(meshlets);
 	mMeshletVertices = std::move(references);
 	mMeshletTriangles = std::move(triangles);
 	mBlas = std::move(blas);
 	mTlas = std::move(tlas);
+	resetAccumulation();
+}
+
+void MeshRaytracer::updateMaterials(Renderer& renderer, const std::vector<SceneMaterial>& materials)
+{
+	validateSceneMaterials(materials);
+	if (materials.size() != mMaterialCount)
+	{
+		throw std::runtime_error("Updating materials must preserve the scene material count.");
+	}
+	const size_t bytes = materials.size() * sizeof(SceneMaterial);
+	auto staging = uploadBuffer(mDevice.Get(), materials.data(), bytes);
+	auto replacement = createBuffer(mDevice.Get(), bytes, D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	ComPtr<ID3D12CommandAllocator> allocator;
+	ComPtr<ID3D12GraphicsCommandList> commands;
+	check(mDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)), "Create material allocator");
+	check(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands)), "Create material command list");
+	commands->CopyResource(replacement.Get(), staging.Get());
+	D3D12_RESOURCE_BARRIER barrier{};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Transition = {replacement.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+		D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
+	commands->ResourceBarrier(1, &barrier);
+	check(commands->Close(), "Close material upload");
+	ID3D12CommandList* lists[] = {commands.Get()};
+	renderer.commandQueue()->ExecuteCommandLists(1, lists);
+	renderer.waitForGpu();
+	mMaterials = std::move(replacement);
 	resetAccumulation();
 }
 
@@ -308,7 +346,7 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[8]{};
+	D3D12_ROOT_PARAMETER parameters[9]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -328,6 +366,8 @@ void MeshRaytracer::createPipeline()
 	parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[7].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[7].DescriptorTable.pDescriptorRanges = &environmentRange;
+	parameters[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[8].Descriptor.ShaderRegister = 6;
 	D3D12_STATIC_SAMPLER_DESC sampler{};
 	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -370,7 +410,7 @@ void MeshRaytracer::createPipeline()
 	hitGroup.HitGroupExport = L"CubeHitGroup";
 	hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
 	hitGroup.ClosestHitShaderImport = L"CHSMain";
-	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{13 * sizeof(float), 2 * sizeof(float)};
+	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{14 * sizeof(float), 2 * sizeof(float)};
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{1};
 	ID3D12RootSignature* globalRoot = mRootSignature.Get();
 	const D3D12_STATE_SUBOBJECT subobjects[] = {
@@ -505,6 +545,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(4, mMeshletVertices->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(5, mMeshlets->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstants(3, sizeof(constants) / sizeof(UINT), &constants, 0);
 	commands->SetPipelineState1(mPipeline.Get());
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;

@@ -29,7 +29,7 @@ IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapT
 # USDデータ
 OpenUSD SDKは `tools/UsdConverter/UsdConverter.slnx` の独立した変換プロジェクトにのみリンクすること
 表示サンプルは `common/SceneFile` の変換済み `.ptscene` を読み、USD SDKやPythonに依存させないこと
-`.ptscene` はmeshlet専用v2形式とし、v1互換処理は追加しないこと。meshoptimizerは外部変換ツールとテストだけで使用し、表示時の再分割は行わないこと
+`.ptscene` はPBRマテリアルを含むmeshlet専用v3形式とし、v1 / v2互換処理は追加しないこと。meshoptimizerは外部変換ツールとテストだけで使用し、表示時の再分割は行わないこと
 入手したKitchen Setの原本と変換データは `assets/local/` または `build/` に置き、コミットしないこと。同梱のPreview Roomは自作モデルでありKitchen Setと混同しないこと
 独自形式を変更した場合はバージョン互換性を明示し、Debug / ReleaseのSceneFileTestsを実行すること
 変換ツールを変更した場合は自作USDフィクスチャを変換してSceneFileTestsの追加引数で検証すること。手順はtools/UsdConverter/README.mdを参照すること

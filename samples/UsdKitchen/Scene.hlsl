@@ -1,15 +1,19 @@
+#include "Pbr.hlsli"
+
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
 {
 	float3 position;
 	float3 normal;
 	float3 color;
+	uint materialIndex;
 };
 StructuredBuffer<Vertex> vertices : register(t1);
 StructuredBuffer<uint> meshletVertices : register(t2);
 StructuredBuffer<uint4> meshlets : register(t3);
 ByteAddressBuffer meshletTriangles : register(t4);
 Texture2D<float4> environmentMap : register(t5);
+StructuredBuffer<Material> materials : register(t6);
 SamplerState environmentSampler : register(s0);
 RWTexture2D<float4> outputImage : register(u0);
 RWTexture2D<float4> accumulation : register(u1);
@@ -48,6 +52,7 @@ struct Payload
 	float3 normal;
 	float3 geometricNormal;
 	uint hit;
+	uint materialIndex;
 };
 static const float pi = 3.14159265359f;
 
@@ -109,7 +114,7 @@ float visibility(float3 position, float3 geometricNormal)
 	query.Proceed();
 	return query.CommittedStatus() == COMMITTED_NOTHING ? 1.0f : 0.0f;
 }
-float3 directLighting(Payload surface)
+float3 directLighting(Surface surface, float3 view)
 {
 	float3 toLight = lightDirection;
 	float attenuation = 1.0f;
@@ -126,17 +131,10 @@ float3 directLighting(Payload surface)
 	{
 		visible = visibility(surface.position, surface.geometricNormal);
 	}
-	float3 irradiance = ambient + lightColor * lightStrength * attenuation * cosine * visible;
-	return surface.color * (1.0f / pi) * irradiance;
-}
-float3 cosineHemisphere(float3 normal, inout uint state)
-{
-	float radius = sqrt(random(state));
-	float phi = 2.0f * pi * random(state);
-	float3 tangent = normalize(cross(abs(normal.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0), normal));
-	float3 bitangent = cross(normal, tangent);
-	return normalize(tangent * (radius * cos(phi)) + bitangent * (radius * sin(phi))
-		+ normal * sqrt(max(0.0f, 1.0f - radius * radius)));
+	float pdf;
+	float3 bsdf = evaluateBsdf(surface, view, toLight, pdf);
+	float3 diffuseFill = surface.baseColor * (1.0f - surface.metallic) * (1.0f - materialF0(surface)) / pi;
+	return bsdf * lightColor * lightStrength * attenuation * cosine * visible + diffuseFill * ambient * surface.occlusion;
 }
 [shader("raygeneration")]
 void RGSMain()
@@ -174,18 +172,39 @@ void RGSMain()
 				radiance += throughput * payload.color;
 				break;
 			}
-			radiance += throughput * directLighting(payload);
+			Material material = materials[payload.materialIndex];
+			Surface surface;
+			surface.position = payload.position;
+			surface.normal = payload.normal;
+			surface.geometricNormal = payload.geometricNormal;
+			surface.baseColor = saturate(payload.color * material.baseColor);
+			surface.metallic = material.metallic;
+			surface.roughness = material.roughness;
+			surface.specular = material.specular;
+			surface.occlusion = material.occlusion;
+			if (meshletColors > 0.5f)
+			{
+				surface.baseColor = payload.color;
+				surface.metallic = 0;
+				surface.roughness = 1;
+				surface.specular = 0;
+				surface.occlusion = 1;
+				material.emissiveStrength = 0;
+			}
+			float3 view = -ray.Direction;
+			radiance += throughput * (material.emissiveColor * material.emissiveStrength + directLighting(surface, view));
 			if (depth == maxBounces)
 			{
 				break;
 			}
-			ray.Direction = cosineHemisphere(payload.normal, state);
-			if (dot(ray.Direction, payload.geometricNormal) <= 0.0f)
+			float3 nextDirection, weight;
+			float3 u = float3(random(state), random(state), random(state));
+			if (!sampleBsdf(surface, view, u, nextDirection, weight))
 			{
 				break;
 			}
-			// Lambert f*cos/pdf cancels to albedo under cosine-weighted sampling.
-			throughput *= payload.color;
+			ray.Direction = nextDirection;
+			throughput *= weight;
 			ray.Origin = offsetOrigin(payload.position, payload.geometricNormal);
 			ray.TMin = 0.0f;
 		}
@@ -231,6 +250,10 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 	{
 		normal = -normal;
 	}
+	if (dot(normal, -WorldRayDirection()) <= 0.0001f)
+	{
+		normal = geometricNormal;
+	}
 	float3 color = a.color * weights.x + b.color * weights.y + c.color * weights.z;
 	if (meshletColors > 0.5f)
 	{
@@ -245,4 +268,5 @@ void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes att
 	payload.geometricNormal = geometricNormal;
 	payload.color = color;
 	payload.hit = 1;
+	payload.materialIndex = a.materialIndex;
 }

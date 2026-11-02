@@ -15,10 +15,11 @@ GeometryIndex()を使用するため、DXR Tier 1.1 / Shader Model 6.5が必要�
 `Meshlet colors` にチェックするとmeshletごとに色分けします。頂点数とmeshlet数はパネルに表示します。
 自動確認には `--meshlet-colors --screenshot <出力.png>` も使用できます。
 同梱Preview Roomは192三角形、480共有頂点、9 meshletsです。
-旧v1（三角形リスト）のバイナリは読み込みません。USDから新しい変換ツールで再変換してください。
+マテリアルテーブルを含むv3形式を読み込みます。旧v1 / v2は未対応のためUSDから再変換してください。
 
 初期表示はリポジトリ用に作成した **Preview Room** です。Kitchen Setとは異なる簡易モデルです。
 ソースは `assets/Source/PreviewRoom/`、変換済みデータは `assets/PreviewRoom.ptscene` です。
+カウンター天板は鏡、冷蔵庫は粗さのある青い金属に設定しています。
 
 ## Kitchen Setを表示する
 
@@ -65,9 +66,9 @@ $app.ExitCode
 - Shadow bias: 幾何法線方向のオフセットの最小値（m）。座標に比例するオフセットも加味し、自己交差を抑えます。非常に小さい形状では調整が必要です。
 - Ambient fill: 影の部分の確認用に加える一定の補助光です。0で無効にできます。間接照明やGIではありません。
 
-シェーディングは線形RGBの `albedo / pi` によるLambert拡散反射です。光の強度は方向光では相対的な照射強度、点光源では距離減衰前の相対強度として扱います。
+シェーディングは線形RGBのGGX鏡面反射と、Fresnel・Metallicで抑制したLambert拡散反射を組み合わせます。光の強度は方向光では相対的な照射強度、点光源では距離減衰前の相対強度として扱います。
 蓄積した線形HDR放射輝度にExposureを適用し、ReinhardトーンマッピングとsRGB変換を行います。
-USDのライトは読み込まず、このサンプル内で設定した光源を使用します。鏡面反射、面光源、ソフトシャドウは未実装です。
+USDのライトは読み込まず、このサンプル内で設定した光源を使用します。面光源の直接サンプリング、ソフトシャドウは未実装です。
 
 確認用の起動オプション:
 
@@ -81,16 +82,47 @@ USDのライトは読み込まず、このサンプル内で設定した光源�
 実装はDXR Tier 1.1 / SM6.5の既存要件内で、各ヒット点からインラインRayQueryを実行します。
 追加のTraceRay再帰やシャドウ用のシェーダーテーブルは必要ありません。
 
+## PBRマテリアルと鏡面反射
+
+ゲームで一般的なMetallic / Roughness方式です。`PBR material` からマテリアル番号を選び、以下の定数パラメータを編集できます。
+変更は同じマテリアルを参照する全三角形へ反映され、蓄積がリセットされます。編集内容は実行中のみ有効です。
+
+| パラメータ | 内容 |
+| --- | --- |
+| Base Color | 線形RGB、0～1。頂点色に乗算。非金属では拡散色、金属では鏡面反射のF0色 |
+| Metallic | 0～1。0は非金属、1は金属。金属の拡散成分は0 |
+| Roughness | 知覚的な粗さ、0～1。0は完全鏡、値を上げると反射・ハイライトが広がる |
+| Specular | 非金属のF0を `0.08 × Specular` で指定。既定0.5は4%、金属ではBase Colorを使用 |
+| Ambient Occlusion | 0～1。補助光と反射後の経路に掛けるアーティスト用係数。直接光・発光には掛けない |
+| Emissive Color / Strength | 線形RGBの色×強度。可視の発光と、反射レイが当たった際の照明に使用 |
+
+USDのメッシュ／GeomSubsetにバインドされた定数マテリアルを取り込みます。Preview Roomの番号0は未バインドの共通マテリアル、1は鏡、2は青い金属です。
+`Reset material` は選択したマテリアルを既定の白い非金属に戻します。元のUSD値に戻す場合はモデルを開き直してください。
+Normalは既存の頂点法線を使用します。UVテクスチャ、Normal Map、Opacity／透過、Clear Coat、異方性はまだ扱いません。
+
+鏡面項はGGX / Trowbridge-Reitz NDF、Smith-GGXのheight-correlated visibility、Schlick Fresnelです。
+Roughnessは二乗してGGXのalphaへ変換し、非ゼロの粗さは数値安定性のため最低0.02を使います。0.001未満は完全鏡のdelta反射です。
+直接光にも同じBRDFを使用します。完全鏡は有限幅の直接光ローブを持たず、次のレイが映したIBL・物体・発光面を反射します。
+拡散とGGXの混合サンプリングで経路を選び、`BRDF × cos / 混合PDF` で重みを更新します。完全鏡はFresnelとローブ選択確率で重みを更新します。
+GGXで面の下に出たサンプルは捨て、再抽選しません。多重散乱のエネルギー補償は未実装です。
+
+```powershell
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --metallic 1 --roughness 0 --bounces 8 --samples 256 --screenshot build/checks/mirror.png
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --metallic 1 --roughness 0.7 --samples 256 --screenshot build/checks/rough-metal.png
+```
+
+`--metallic`、`--roughness`、`--specular` は0～1で、ロード時に全マテリアルへ適用する比較用の上書きです。
+参考: [Filamentの標準PBRモデル](https://google.github.io/filament/Filament.md.html)、[UsdPreviewSurface仕様](https://openusd.org/dev/spec_usdpreviewsurface.html)
+
 ## 間接照明とIBL
 
-初期設定で3回の拡散バウンスを追跡します。各ヒット点で上記の直接照明を評価し、余弦重み付き半球サンプリングで次のレイを生成します。
-Lambert BRDFとサンプリングPDFが打ち消し合うため、経路のスループットには各面のアルベドを乗じます。
+初期設定で最大3回の反射を追跡します。各ヒット点で上記の直接照明・発光を評価し、PBRマテリアルに応じて拡散・鏡面の次レイを生成します。
 一次レイ・反射後のレイともMiss ShaderでIBLテクスチャを参照します。IBLは背景にも、物体の照明にも使用します。
 光源までの遮蔽レイのMissは可視判定だけに使い、IBLの寄与を二重に加算しません。
 
 `Indirect lighting / IBL` の操作:
 
-- Diffuse bounces: 拡散反射の回数（0～8、既定3）。0では物体は直接照明のみとなり、背景のIBL表示は維持します。
+- Path bounces: 拡散・鏡面を合わせた反射回数（0～8、既定3）。0では物体は直接照明・発光のみとなり、背景のIBL表示は維持します。
 - Samples per frame: 1フレームあたりのサンプル数（1～16、既定1）。カメラレイの位置もジッターします。
 - IBL intensity / rotation: 環境マップの強度（0～100、既定1）と水平方向の回転。
 - Open IBL (.hdr): 緯度経度形式のRadiance HDRを選択します。Preview skyで自作の空マップに戻せます。
@@ -103,8 +135,8 @@ Lambert BRDFとサンプリングPDFが打ち消し合うため、経路のス�
 FORMAT・解像度以外のHDRメタデータは適用しません。入手したHDRは `assets/local/` などGit管理外の場所に置いてください。
 
 GPU上のRGBA32Fテクスチャに線形HDRの平均を蓄積し、表示時にトーンマッピングします。動かしている間は蓄積がリセットされるため、静止するとノイズが減ります。
-現在は拡散反射と固定のバウンス上限によるパストレーシングです。IBLの重要度サンプリング、MIS、デノイズ、Russian roulette、鏡面・透過反射は未実装です。
-小さく明るい光を含むHDRや閉じた空間では収束に多くのサンプルが必要です。
+固定のバウンス上限によるパストレーシングです。IBL・発光面の直接サンプリング、MIS、デノイズ、Russian roulette、透過反射は未実装です。
+小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 
 ```powershell
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --ibl "assets/local/studio.hdr" --spp 4 --samples 256 --screenshot build/checks/ibl.png
@@ -123,5 +155,5 @@ HDR読み込みのCPUテストはDebug / Releaseの `EnvironmentMapTests.exe bui
 静的メッシュの形状確認用です。階層変換、参照・ペイロード、ネイティブインスタンス、凹多角形、法線、displayColor、定数のマテリアル色を変換します。
 ステージ開始時刻をメートル単位、右手系Y-upの三角形に固定します。
 サブディビジョンは制御ポリゴンのままです。テクスチャ、USDライト、透明度、シェーダーネットワーク、アニメーション、PointInstancerは未対応です。
-色と拡散反射によるプレビューであり、USDの最終ルックを再現するものではありません。
+定数PBRパラメータによるプレビューであり、USDの最終ルックを再現するものではありません。
 CLASはまだ使用していません。

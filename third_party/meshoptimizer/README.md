@@ -8,5 +8,6 @@ Upstream source formatting is preserved. No package installation, CMake or runti
 
 The USD converter and SceneFileTests compile these sources directly. SampleFramework and the viewer do not link meshoptimizer.
 Our integration is tools/UsdConverter/MeshletBuilder.cpp. It deduplicates the full vertex record and calls meshopt_buildMeshletsSpatial with 64 vertices, 32 minimum / 126 maximum triangles, fill_weight 0.5.
+The vertex record includes its material index, preserving PBR material seams.
 The maxima follow NVIDIA's mesh-shading recommendation: https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/ . This is not a CLAS-specific performance guarantee.
 The minimum triangle count is a clustering target; small or vertex-limited meshlets can contain fewer triangles.
