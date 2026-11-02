@@ -4,6 +4,7 @@
 #include "../samples/UsdKitchen/RectangleLight.hlsli"
 #include "../samples/UsdKitchen/MeshLight.hlsli"
 #include "../samples/UsdKitchen/RussianRoulette.hlsli"
+#include "../samples/UsdKitchen/RestirDI.hlsli"
 
 struct TestCase
 {
@@ -92,6 +93,83 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	float maximum = 0;
 	for (uint index = 0; index < samplesPerThread; ++index)
 	{
+		if ((input.flags & 256u) != 0)
+		{
+			uint mode = (input.flags >> 9u) & 3u;
+			uint sources = mode >= 2 ? (mode == 3 ? 5u : 2u) : 1u;
+			LightReservoir combined = (LightReservoir)0;
+			for (uint sourceIndex = 0; sourceIndex < sources; ++sourceIndex)
+			{
+				Surface sourceSurface = surface;
+				if ((sourceIndex & 1u) != 0)
+				{
+					// Deliberately disjoint BRDF horizons exercise the support floor.
+					sourceSurface.normal = sourceSurface.geometricNormal = -surface.normal;
+				}
+				LightReservoir reservoir = (LightReservoir)0;
+				for (uint candidateIndex = 0; candidateIndex < (mode == 0 ? 1u : 8u); ++candidateIndex)
+				{
+					LightReservoir candidate = (LightReservoir)0;
+					candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+					candidate.uv = float2(random(state), random(state));
+					MeshLight light = meshLights[candidate.lightIndex];
+					float target = lightSampleTarget(evaluateReservoirSample(sourceSurface, view, light, candidate.uv), light.areaDensity);
+					streamReservoir(reservoir, candidate, target, target / light.areaDensity, 1, random(state));
+				}
+				finishReservoir(reservoir);
+				MeshLight light = meshLights[reservoir.lightIndex];
+				float target = lightSampleTarget(evaluateReservoirSample(surface, view, light, reservoir.uv), light.areaDensity);
+				// Also exercise deterministic effective-count capping on reused sources.
+				float count = min(reservoir.count, sourceIndex == 0 ? 8.0f : 4.0f);
+				streamReservoir(combined, reservoir, target, target * reservoir.weight * count, count, random(state));
+			}
+			finishReservoir(combined);
+			float3 value = evaluateReservoirSample(surface, view, meshLights[combined.lightIndex], combined.uv) * combined.weight;
+			if (any(!isfinite(value)) || any(value < 0) || !isfinite(combined.weight) || combined.count <= 0)
+			{
+				++invalid;
+			}
+			if (index == 0)
+			{
+				PrimarySurface a = (PrimarySurface)0;
+				a.valid = 1;
+				a.depth = 1;
+				a.normal = a.geometricNormal = float3(0,0,1);
+				PrimarySurface b = a;
+				b.position.x = 1;
+				float4x4 identity = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+				float2 center = reprojectPrimary(0.0f, identity, float2(1280,720), 600);
+				identity[3][0] = 0.1f;
+				float2 moved = reprojectPrimary(0.0f, identity, float2(1280,720), 600);
+				if (!compatiblePrimarySurfaces(a, a) || compatiblePrimarySurfaces(a, b)
+					|| any(abs(center - float2(940,360)) > 0.001f) || any(abs(moved - float2(974,360)) > 0.001f))
+				{
+					++invalid;
+				}
+				b = a;
+				b.materialIndex = 1;
+				if (compatiblePrimarySurfaces(a, b))
+				{
+					++invalid;
+				}
+				b = a;
+				b.normal = -a.normal;
+				if (compatiblePrimarySurfaces(a, b))
+				{
+					++invalid;
+				}
+				identity[2][3] = 1;
+				identity[3][3] = 0;
+				if (any(reprojectPrimary(float3(0,0,-1), identity, float2(1280,720), 600) != -1.0f))
+				{
+					++invalid;
+				}
+			}
+			sum += value;
+			sumSquared += value * value;
+			maximum = max(maximum, maxComponent(value));
+			continue;
+		}
 		if ((input.flags & 64u) != 0)
 		{
 			// An eight-vertex path with known geometric-series radiance. This

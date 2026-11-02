@@ -8,6 +8,7 @@
 #include "MeshLight.h"
 
 #include <d3d12.h>
+#include <array>
 #include <wrl/client.h>
 
 class Renderer;
@@ -30,6 +31,7 @@ private:
 	void createPipeline();
 	void createShaderTable();
 	void resizeOutput(UINT width, UINT height);
+	void resizeRestir(size_t pixels);
 	ComPtr<ID3D12Device5> mDevice;
 	ComPtr<ID3D12Resource> mVertices;
 	ComPtr<ID3D12Resource> mMaterials;
@@ -60,4 +62,10 @@ private:
 	uint32_t mLastSamplesPerFrame = 1;
 	bool mResetAccumulation = true;
 	std::vector<uint8_t> mPreviousConstants;
+	std::array<ComPtr<ID3D12Resource>,5> mRestirBuffers;
+	size_t mRestirPixels = 0;
+	bool mRestirHistoryValid = false;
+	uint32_t mRestirFrame = 0;
+	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
+	float mPreviousViewportLeft = 0;
 };

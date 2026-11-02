@@ -242,6 +242,61 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mRussianRoulette = false;
 			continue;
 		}
+		if ((flag == L"--restir" || flag == L"--restir-debug") && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			if (flag == L"--restir")
+			{
+				if (value == L"off")
+				{
+					mTracing.mRestirMode = 0;
+				}
+				else if (value == L"ris")
+				{
+					mTracing.mRestirMode = 1;
+				}
+				else if (value == L"temporal")
+				{
+					mTracing.mRestirMode = 2;
+				}
+				else if (value == L"spatial")
+				{
+					mTracing.mRestirMode = 3;
+				}
+				else
+				{
+					throw std::runtime_error("--restir expects off, ris, temporal, or spatial.");
+				}
+			}
+			else
+			{
+				if (value == L"off")
+				{
+					mTracing.mRestirDebug = 0;
+				}
+				else if (value == L"normal")
+				{
+					mTracing.mRestirDebug = 1;
+				}
+				else if (value == L"depth")
+				{
+					mTracing.mRestirDebug = 2;
+				}
+				else if (value == L"motion")
+				{
+					mTracing.mRestirDebug = 3;
+				}
+				else if (value == L"reservoir")
+				{
+					mTracing.mRestirDebug = 4;
+				}
+				else
+				{
+					throw std::runtime_error("--restir-debug expects off, normal, depth, motion, or reservoir.");
+				}
+			}
+			continue;
+		}
 		if (flag == L"--ibl-intensity" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -287,7 +342,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -635,6 +690,16 @@ void UsdKitchen::drawGui()
 		ImGui::ColorEdit3("Rectangle color (linear)", rectangle.mColor.data(), ImGuiColorEditFlags_Float);
 		ImGui::SliderFloat("Rectangle radiance", &rectangle.mRadiance, 0.0f, 10000.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
 		ImGui::TextWrapped("One-sided emitter with an opaque back. Size changes total power at fixed radiance. Rectangle shadows are always enabled.");
+	}
+	if (ImGui::CollapsingHeader("ReSTIR DI"))
+	{
+		int mode = static_cast<int>(mTracing.mRestirMode);
+		int debug = static_cast<int>(mTracing.mRestirDebug);
+		ImGui::Combo("Emissive sampling", &mode, "NEE / MIS\0RIS (8 candidates)\0Temporal reuse\0Temporal + spatial reuse\0");
+		ImGui::Combo("G-buffer view", &debug, "Lighting\0Normal\0Depth\0Motion\0Reservoir / history\0");
+		mTracing.mRestirMode = static_cast<uint32_t>(mode);
+		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
+		ImGui::TextWrapped("Primary emissive mesh lighting. Other lights and secondary bounces use existing NEE / MIS.");
 	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{

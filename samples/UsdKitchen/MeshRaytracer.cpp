@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -99,8 +100,17 @@ struct SceneConstants
 	uint32_t mEmissiveMis = 1;
 	uint32_t mMultipleScattering = 1;
 	uint32_t mRussianRoulette = 1;
+	uint32_t mRestirMode = 0;
+	uint32_t mRestirDebug = 0;
+	std::array<float,2> mRestirPadding{};
+	uint32_t mHistoryValid = 0;
+	uint32_t mRestirFrame = 0;
+	std::array<float,2> mHistoryPadding{};
+	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
+	float mPreviousViewportLeft = 0;
+	std::array<float,3> mPreviousCameraPadding{};
 };
-static_assert(sizeof(SceneConstants) == 64 * sizeof(float));
+static_assert(sizeof(SceneConstants) == 368);
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -115,7 +125,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 	createPipeline();
 	createShaderTable();
 	mGgxEnergy = uploadBuffer(mDevice.Get(), ggxEnergyLut.data(), sizeof(ggxEnergyLut));
-	mConstants = createBuffer(mDevice.Get(), 256, D3D12_HEAP_TYPE_UPLOAD,
+	mConstants = createBuffer(mDevice.Get(), 512, D3D12_HEAP_TYPE_UPLOAD,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -402,7 +412,7 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[12]{};
+	D3D12_ROOT_PARAMETER parameters[18]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -429,6 +439,14 @@ void MeshRaytracer::createPipeline()
 	parameters[10].Descriptor.ShaderRegister = 8;
 	parameters[11].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[11].Descriptor.ShaderRegister = 9;
+	parameters[12].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	parameters[12].Constants.ShaderRegister = 1;
+	parameters[12].Constants.Num32BitValues = 1;
+	for (UINT i = 0; i < 5; ++i)
+	{
+		parameters[13 + i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+		parameters[13 + i].Descriptor.ShaderRegister = 2 + i;
+	}
 	D3D12_STATIC_SAMPLER_DESC sampler{};
 	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -540,12 +558,29 @@ void MeshRaytracer::resizeOutput(UINT width, UINT height)
 	mHeight = height;
 }
 
+void MeshRaytracer::resizeRestir(size_t pixels)
+{
+	if (pixels == mRestirPixels)
+	{
+		return;
+	}
+	std::array<ComPtr<ID3D12Resource>,5> buffers;
+	for (size_t i = 0; i < buffers.size(); ++i)
+	{
+		buffers[i] = createBuffer(mDevice.Get(), pixels * (i < 2 ? 80 : 32), D3D12_HEAP_TYPE_DEFAULT,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	}
+	mRestirBuffers = std::move(buffers);
+	mRestirPixels = pixels;
+	mRestirHistoryValid = false;
+}
+
 void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation))
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -553,6 +588,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	{
 		// The framework waits for the previous frame before resizing or reusing resources.
 		resizeOutput(renderer.width(), renderer.height());
+		mRestirHistoryValid = false;
 	}
 	SceneConstants constants{};
 	constants.mPosition = camera.position();
@@ -586,6 +622,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mEmissiveMis = tracing.mEmissiveMis && !meshletColors ? 1u : 0u;
 	constants.mMultipleScattering = tracing.mMultipleScattering ? 1u : 0u;
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
+	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
+	constants.mRestirDebug = tracing.mRestirDebug;
+	resizeRestir(constants.mRestirMode > 0 ? static_cast<size_t>(mWidth) * mHeight : 1);
 	const auto& rectangle = lighting.mRectangle;
 	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
 		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
@@ -615,13 +654,22 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		}
 		constants.mRectangleRadiance[channel] = rectangle.mColor[channel] * rectangle.mRadiance;
 	}
-	// Compare all integrator inputs except the frame index, which is still zero here.
-	if (mResetAccumulation || mPreviousConstants.size() != sizeof(constants)
-		|| std::memcmp(mPreviousConstants.data(), &constants, sizeof(constants)) != 0 || mAccumulatedFrames == UINT32_MAX)
+	// History camera data changes every frame and must not reset accumulation.
+	constexpr size_t integratorSize = offsetof(SceneConstants, mHistoryValid);
+	constexpr size_t cameraSize = offsetof(SceneConstants, mBackground);
+	const bool hadPrevious = mPreviousConstants.size() == integratorSize;
+	const bool settingsChanged = !hadPrevious
+		|| std::memcmp(mPreviousConstants.data() + cameraSize, reinterpret_cast<const uint8_t*>(&constants) + cameraSize, integratorSize - cameraSize) != 0;
+	constants.mHistoryValid = mRestirHistoryValid && !mResetAccumulation && !settingsChanged ? 1u : 0u;
+	constants.mRestirFrame = mRestirFrame++;
+	constants.mPreviousViewProjection = mPreviousViewProjection;
+	constants.mPreviousViewportLeft = mPreviousViewportLeft;
+	if (mResetAccumulation || !hadPrevious
+		|| std::memcmp(mPreviousConstants.data(), &constants, integratorSize) != 0 || mAccumulatedFrames == UINT32_MAX)
 	{
 		mAccumulatedFrames = 0;
-		mPreviousConstants.resize(sizeof(constants));
-		std::memcpy(mPreviousConstants.data(), &constants, sizeof(constants));
+		mPreviousConstants.resize(integratorSize);
+		std::memcpy(mPreviousConstants.data(), &constants, integratorSize);
 		mResetAccumulation = false;
 	}
 	constants.mFrameIndex = mAccumulatedFrames;
@@ -644,6 +692,10 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(10, mMeshLights->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(11, mGgxEnergy->GetGPUVirtualAddress());
+	for (UINT i = 0; i < 5; ++i)
+	{
+		commands->SetComputeRootUnorderedAccessView(13 + i, mRestirBuffers[i]->GetGPUVirtualAddress());
+	}
 	// SampleFramework has waited for the previous frame before this upload is reused.
 	void* mappedConstants = nullptr;
 	const D3D12_RANGE noRead{0, 0};
@@ -665,7 +717,34 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	accumulationBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	accumulationBarrier.UAV.pResource = mAccumulation.Get();
 	commands->ResourceBarrier(1, &accumulationBarrier);
+	if (constants.mRestirMode > 0)
+	{
+		D3D12_RESOURCE_BARRIER restirBarrier{};
+		restirBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+		for (UINT pass = 0; pass < 2; ++pass)
+		{
+			commands->ResourceBarrier(1, &restirBarrier);
+			commands->SetComputeRoot32BitConstant(12, pass, 0);
+			commands->DispatchRays(&dispatch);
+		}
+		commands->ResourceBarrier(1, &restirBarrier);
+	}
+	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	commands->DispatchRays(&dispatch);
+	if (constants.mRestirMode > 0)
+	{
+		std::swap(mRestirBuffers[0], mRestirBuffers[1]);
+		std::swap(mRestirBuffers[3], mRestirBuffers[4]);
+	}
+	mRestirHistoryValid = constants.mRestirMode > 0;
+	const auto position = camera.position();
+	const auto cameraForward = camera.forward();
+	const auto up = camera.up();
+	// Camera::up() = right x forward: match its right-handed ray basis.
+	const auto view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&position), DirectX::XMLoadFloat3(&cameraForward), DirectX::XMLoadFloat3(&up));
+	const auto projection = DirectX::XMMatrixPerspectiveFovRH(2 * std::atan(camera.tanHalfFov()), constants.mAspect, 0.001f, 100000.0f);
+	DirectX::XMStoreFloat4x4(&mPreviousViewProjection, view * projection);
+	mPreviousViewportLeft = viewportLeft;
 	++mAccumulatedFrames;
 
 	D3D12_RESOURCE_BARRIER barriers[2]{};

@@ -418,6 +418,71 @@ void checkRussianRoulette(const std::filesystem::path& directory, bool warp)
 	}
 	std::cout << "Russian roulette passed: " << cases.size() << " cases, " << sampleCount << " paths/case.\n";
 }
+void checkRestir(const std::filesystem::path& directory, bool warp)
+{
+	std::vector<Test> tests;
+	for (float noV : {1.0f, 0.1f})
+	{
+		for (unsigned material = 0; material < 4; ++material)
+		{
+			for (uint32_t mode = 0; mode < 4; ++mode)
+			{
+				CaseData data{{0.2f,0.5f,0.8f}, 0, 0.6f, 0, noV, 256u | (mode << 9u)};
+				if (material == 1)
+				{
+					data.mSpecular = 1;
+				}
+				if (material == 2)
+				{
+					data.mMetallic = 1;
+					data.mSpecular = 0.5f;
+				}
+				if (material == 3)
+				{
+					data.mBaseColor = {0,0,0};
+				}
+				tests.push_back({data, "reservoir", {}});
+			}
+		}
+	}
+	const auto results = integrate(tests, warp);
+	std::ofstream csv(directory / L"restir.csv");
+	csv << "case,mode,channel,mean,standard_error,baseline,variance,pass\n" << std::setprecision(9);
+	size_t failures = 0;
+	const double formFactor = 4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25));
+	for (size_t index = 0; index < tests.size(); ++index)
+	{
+		const auto& result = results[index];
+		const auto& baseline = results[index - index % 4];
+		for (size_t axis = 0; axis < 3; ++axis)
+		{
+			const double error = std::sqrt(result.mVariance[axis] / sampleCount);
+			const double combinedError = std::sqrt((result.mVariance[axis] + baseline.mVariance[axis]) / sampleCount);
+			bool pass = result.mInvalid == 0 && std::isfinite(result.mMean[axis]) && std::isfinite(error)
+				&& result.mMean[axis] >= 0 && std::abs(result.mMean[axis] - baseline.mMean[axis]) <= 0.001 + 6 * combinedError;
+			if ((index / 4) % 4 == 0 || (index / 4) % 4 == 3)
+			{
+				pass &= std::abs(result.mMean[axis] - tests[index].mData.mBaseColor[axis] * formFactor) <= 0.0005 + 6 * error;
+			}
+			if ((index / 4) % 4 == 0 && index % 4 == 1)
+			{
+				pass &= result.mVariance[axis] < baseline.mVariance[axis] * 0.2f;
+			}
+			csv << index / 4 << ',' << index % 4 << ',' << axis << ',' << result.mMean[axis] << ',' << error << ',' << baseline.mMean[axis] << ',' << result.mVariance[axis] << ',' << pass << '\n';
+			if (!pass)
+			{
+				++failures;
+				std::cerr << "ReSTIR FAIL: " << index << " channel=" << axis << '\n';
+			}
+		}
+	}
+	csv.close();
+	if (!csv || failures)
+	{
+		throw std::runtime_error("ReSTIR reservoir checks failed; inspect restir.csv.");
+	}
+	std::cout << "ReSTIR reservoir checks passed: " << tests.size() << " cases.\n";
+}
 void writeRectangleFixtures(const std::filesystem::path& directory)
 {
 	SceneData scene;
@@ -561,6 +626,7 @@ int wmain(int count, wchar_t** arguments)
 		}
 		std::cout << "White furnace passed: " << tests.size() << " cases, " << sampleCount << " samples/case. CSV: " << (directory / L"furnace.csv").string() << '\n';
 		checkRussianRoulette(directory, count == 3);
+		checkRestir(directory, count == 3);
 		return 0;
 	}
 	catch (const std::exception& error)
