@@ -36,7 +36,7 @@ struct CaseData
 	float mRoughness = 0.5f;
 	float mSpecular = 0.5f;
 	float mNoV = 1;
-	uint32_t mReferenceEnabled = 0;
+	uint32_t mFlags = 0;
 };
 static_assert(sizeof(CaseData) == 32);
 struct Result
@@ -260,15 +260,71 @@ std::vector<Test> testCases()
 		tests.push_back({{{0,0,0}, 0, 0.5f, 0, noV, 1}, "absorber", std::array<float,3>{0,0,0}});
 		tests.push_back({{{1,1,1}, 0, 0.3f, 1, noV, 0}, "high-specular", {}});
 	}
+	const size_t environmentCount = tests.size();
+	// Exact Lambert form factor for a centered 2x2 rectangle at distance 2.
+	const float lambertFactor = static_cast<float>(4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25)));
+	for (size_t index = 0; index < environmentCount; ++index)
+	{
+		auto rectangle = tests[index];
+		rectangle.mData.mFlags |= 4u;
+		rectangle.mName = "rectangle-" + rectangle.mName;
+		if (rectangle.mName == "rectangle-lambert-white" || rectangle.mName == "rectangle-lambert-color")
+		{
+			for (float& channel : *rectangle.mExpected)
+			{
+				channel *= lambertFactor;
+			}
+		}
+		else if (rectangle.mData.mMetallic == 1 && rectangle.mData.mRoughness == 0)
+		{
+			const float value = rectangle.mData.mNoV == 1 ? 1.0f : 0.0f;
+			rectangle.mExpected = {value,value,value};
+		}
+		tests.push_back(rectangle);
+	}
 	const size_t count = tests.size();
 	for (size_t index = 0; index < count; ++index)
 	{
 		auto mis = tests[index];
-		mis.mData.mReferenceEnabled |= 2u;
+		mis.mData.mFlags |= 2u;
 		mis.mName = "mis-" + mis.mName;
 		tests.push_back(mis);
 	}
 	return tests;
+}
+void writeRectangleFixtures(const std::filesystem::path& directory)
+{
+	SceneData scene;
+	scene.mHeader.mMeshCount = 1;
+	scene.mMaterials[0].mSpecular = 0;
+	auto quad = [&](std::array<float,3> a, std::array<float,3> b, std::array<float,3> c, std::array<float,3> d, std::array<float,3> normal)
+	{
+		const auto first = static_cast<uint8_t>(scene.mVertices.size());
+		for (const auto& position : {a,b,c,d})
+		{
+			scene.mMeshletVertices.push_back(static_cast<uint32_t>(scene.mVertices.size()));
+			scene.mVertices.push_back({position, normal, {1,1,1}});
+		}
+		for (uint8_t index : std::array<uint8_t,6>{0,2,1,0,3,2})
+		{
+			scene.mMeshletTriangles.push_back(first + index);
+		}
+	};
+	quad({-2,0,-2}, {2,0,-2}, {2,0,2}, {-2,0,2}, {0,1,0});
+	scene.mMeshlets = {{0,0,4,2}};
+	writeSceneFile(directory / L"rectangle-floor.ptscene", scene);
+	scene.mMaterials[0].mMetallic = 1;
+	scene.mMaterials[0].mRoughness = 0;
+	writeSceneFile(directory / L"rectangle-mirror.ptscene", scene);
+	scene.mMaterials[0] = SceneMaterial{};
+	scene.mMaterials[0].mSpecular = 0;
+	quad({-0.4f,1,-0.4f}, {0.4f,1,-0.4f}, {0.4f,1,0.4f}, {-0.4f,1,0.4f}, {0,1,0});
+	quad({-0.4f,0,-0.4f}, {0.4f,0,-0.4f}, {0.4f,1,-0.4f}, {-0.4f,1,-0.4f}, {0,0,-1});
+	quad({-0.4f,0,0.4f}, {0.4f,0,0.4f}, {0.4f,1,0.4f}, {-0.4f,1,0.4f}, {0,0,1});
+	quad({-0.4f,0,-0.4f}, {-0.4f,0,0.4f}, {-0.4f,1,0.4f}, {-0.4f,1,-0.4f}, {-1,0,0});
+	quad({0.4f,0,-0.4f}, {0.4f,0,0.4f}, {0.4f,1,0.4f}, {0.4f,1,-0.4f}, {1,0,0});
+	scene.mMeshlets = {{0,0,static_cast<uint32_t>(scene.mVertices.size()),static_cast<uint32_t>(scene.mMeshletTriangles.size() / 3)}};
+	writeSceneFile(directory / L"rectangle-shadow.ptscene", scene);
 }
 void writeFixtures(const std::filesystem::path& directory)
 {
@@ -309,6 +365,7 @@ int wmain(int count, wchar_t** arguments)
 		const std::filesystem::path directory = arguments[1];
 		std::filesystem::create_directories(directory);
 		writeFixtures(directory);
+		writeRectangleFixtures(directory);
 		const auto tests = testCases();
 		const auto results = integrate(tests, count == 3);
 		std::ofstream csv(directory / L"furnace.csv");
@@ -329,14 +386,14 @@ int wmain(int count, wchar_t** arguments)
 					&& mean >= -0.0001 && mean <= 1.002 + 6 * error;
 				if (test.mExpected)
 				{
-					pass &= std::abs(mean - (*test.mExpected)[axis]) <= 0.0005 + ((test.mData.mReferenceEnabled & 2u) ? 6 * error : 0);
+					pass &= std::abs(mean - (*test.mExpected)[axis]) <= 0.0005 + ((test.mData.mFlags & 6u) ? 6 * error : 0);
 				}
-				if (test.mData.mReferenceEnabled & 1u)
+				if (test.mData.mFlags & 1u)
 				{
 					pass &= std::isfinite(result.mReference[axis]) && std::isfinite(referenceError)
 						&& std::abs(mean - result.mReference[axis]) <= 0.005 + 6 * std::hypot(error, referenceError);
 				}
-				if (test.mData.mReferenceEnabled & 2u)
+				if (test.mData.mFlags & 2u)
 				{
 					// MIS cases follow the corresponding BSDF-only cases in the same order.
 					const auto& baseline = results[index - tests.size() / 2];

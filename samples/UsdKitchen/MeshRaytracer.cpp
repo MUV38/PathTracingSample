@@ -86,8 +86,16 @@ struct SceneConstants
 	float mEnvironmentRotation = 0.0f;
 	uint32_t mEnvironmentMis = 1;
 	std::array<float, 2> mPadding2{};
+	DirectX::XMFLOAT3 mRectanglePosition;
+	uint32_t mRectangleEnabled = 0;
+	DirectX::XMFLOAT3 mRectangleU;
+	float mRectangleWidth = 1;
+	DirectX::XMFLOAT3 mRectangleV;
+	float mRectangleHeight = 1;
+	std::array<float, 3> mRectangleRadiance{};
+	uint32_t mRectangleMis = 1;
 };
-static_assert(sizeof(SceneConstants) == 44 * sizeof(float));
+static_assert(sizeof(SceneConstants) == 60 * sizeof(float));
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -101,6 +109,8 @@ void MeshRaytracer::initialize(Renderer& renderer)
 	}
 	createPipeline();
 	createShaderTable();
+	mConstants = createBuffer(mDevice.Get(), 256, D3D12_HEAP_TYPE_UPLOAD,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	heap.NumDescriptors = 3;
@@ -348,9 +358,8 @@ void MeshRaytracer::createPipeline()
 	parameters[1].Descriptor.ShaderRegister = 0;
 	parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[2].Descriptor.ShaderRegister = 1;
-	parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	parameters[3].Constants.Num32BitValues = sizeof(SceneConstants) / sizeof(UINT);
-	parameters[3].Constants.ShaderRegister = 0;
+	parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	parameters[3].Descriptor.ShaderRegister = 0;
 	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[4].Descriptor.ShaderRegister = 2;
 	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -517,6 +526,35 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mEnvironmentIntensity = tracing.mEnvironmentIntensity;
 	constants.mEnvironmentRotation = DirectX::XMConvertToRadians(tracing.mEnvironmentRotation);
 	constants.mEnvironmentMis = tracing.mEnvironmentMis ? 1u : 0u;
+	const auto& rectangle = lighting.mRectangle;
+	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
+		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
+		|| !std::isfinite(rectangle.mAzimuth) || !std::isfinite(rectangle.mElevation)
+		|| !std::isfinite(rectangle.mPosition.x) || !std::isfinite(rectangle.mPosition.y) || !std::isfinite(rectangle.mPosition.z)
+		|| !std::isfinite(rectangle.mRadiance) || rectangle.mRadiance < 0 || rectangle.mRadiance > 10000)
+	{
+		throw std::runtime_error("Invalid rectangle light settings.");
+	}
+	const float rectAzimuth = DirectX::XMConvertToRadians(rectangle.mAzimuth);
+	const float rectElevation = DirectX::XMConvertToRadians(rectangle.mElevation);
+	const auto normal = DirectX::XMVectorSet(std::cos(rectElevation) * std::sin(rectAzimuth), std::sin(rectElevation),
+		std::cos(rectElevation) * std::cos(rectAzimuth), 0);
+	const auto axisU = DirectX::XMVectorSet(std::cos(rectAzimuth), 0, -std::sin(rectAzimuth), 0);
+	DirectX::XMStoreFloat3(&constants.mRectangleU, axisU);
+	DirectX::XMStoreFloat3(&constants.mRectangleV, DirectX::XMVector3Cross(normal, axisU));
+	constants.mRectanglePosition = rectangle.mPosition;
+	constants.mRectangleWidth = rectangle.mWidth;
+	constants.mRectangleHeight = rectangle.mHeight;
+	constants.mRectangleEnabled = rectangle.mEnabled ? 1u : 0u;
+	constants.mRectangleMis = rectangle.mMis ? 1u : 0u;
+	for (size_t channel = 0; channel < 3; ++channel)
+	{
+		if (!std::isfinite(rectangle.mColor[channel]) || rectangle.mColor[channel] < 0 || rectangle.mColor[channel] > 1)
+		{
+			throw std::runtime_error("Invalid rectangle light color.");
+		}
+		constants.mRectangleRadiance[channel] = rectangle.mColor[channel] * rectangle.mRadiance;
+	}
 	// Compare all integrator inputs except the frame index, which is still zero here.
 	if (mResetAccumulation || mPreviousConstants.size() != sizeof(constants)
 		|| std::memcmp(mPreviousConstants.data(), &constants, sizeof(constants)) != 0 || mAccumulatedFrames == UINT32_MAX)
@@ -544,7 +582,13 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
-	commands->SetComputeRoot32BitConstants(3, sizeof(constants) / sizeof(UINT), &constants, 0);
+	// SampleFramework has waited for the previous frame before this upload is reused.
+	void* mappedConstants = nullptr;
+	const D3D12_RANGE noRead{0, 0};
+	check(mConstants->Map(0, &noRead, &mappedConstants), "Map scene constants");
+	std::memcpy(mappedConstants, &constants, sizeof(constants));
+	mConstants->Unmap(0, nullptr);
+	commands->SetComputeRootConstantBufferView(3, mConstants->GetGPUVirtualAddress());
 	commands->SetPipelineState1(mPipeline.Get());
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
 	const D3D12_GPU_VIRTUAL_ADDRESS table = mShaderTable->GetGPUVirtualAddress();

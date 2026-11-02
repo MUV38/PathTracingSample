@@ -19,6 +19,7 @@ UsdKitchenの間接照明・IBLを確認するときは `--samples 128 --screens
 IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapTests.exe build/checks` を実行すること
 IBLのサンプリング分布・NEE・MISを変更した場合もEnvironmentMapTestsとRunWhiteFurnaceを両構成で実行し、`--no-ibl-mis` と同じサンプル数で画像を比較すること
 UsdKitchenのBRDF評価・サンプリングを変更した場合はDebug / Releaseの `tests/RunWhiteFurnace.ps1 -Configuration <構成>` を実行し、出力PNGも確認すること。判定範囲と許容誤差は `tests/WhiteFurnace.md` を参照すること
+矩形面光源の交差判定・PDF・NEE/MISを変更した場合はDebug / Releaseの `tests/RunRectangleLight.ps1 -Configuration <構成>` を実行すること。保存PNGを開き、大小ライトの半影、表裏、鏡への映り込みも確認すること。手順は `tests/RectangleLight.md` を参照すること
 
 # サンプル構成
 ウィンドウ、DirectX 12初期化、ImGui、撮影機能は `common/` のSampleFrameworkで共有する

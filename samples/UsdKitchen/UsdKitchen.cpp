@@ -92,6 +92,78 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	for (size_t index = 0; index < arguments.size(); ++index)
 	{
 		const auto& flag = arguments[index];
+		if (flag == L"--rect-light" || flag == L"--no-rect-mis")
+		{
+			if (flag == L"--rect-light")
+			{
+				mLighting.mRectangle.mEnabled = true;
+			}
+			else
+			{
+				mLighting.mRectangle.mMis = false;
+			}
+			continue;
+		}
+		if (flag == L"--rect-position" || flag == L"--rect-size" || flag == L"--rect-orientation"
+			|| flag == L"--rect-color" || flag == L"--rect-radiance")
+		{
+			const size_t count = flag == L"--rect-radiance" ? 1 : (flag == L"--rect-size" || flag == L"--rect-orientation" ? 2 : 3);
+			if (index + count >= arguments.size())
+			{
+				throw std::runtime_error("Rectangle options: --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance value.");
+			}
+			std::array<float,3> values{};
+			for (size_t axis = 0; axis < count; ++axis)
+			{
+				const auto& value = arguments[++index];
+				size_t consumed = 0;
+				values[axis] = std::stof(value, &consumed);
+				float minimum = -100000, maximum = 100000;
+				if (flag == L"--rect-size")
+				{
+					minimum = 0.01f;
+					maximum = 100;
+				}
+				else if (flag == L"--rect-color" || flag == L"--rect-radiance")
+				{
+					minimum = 0;
+					maximum = flag == L"--rect-color" ? 1.0f : 10000.0f;
+				}
+				else if (flag == L"--rect-orientation")
+				{
+					maximum = axis == 0 ? 180.0f : 90.0f;
+					minimum = -maximum;
+				}
+				if (consumed != value.size() || !std::isfinite(values[axis]) || values[axis] < minimum || values[axis] > maximum)
+				{
+					throw std::runtime_error("Rectangle light parameter is outside its valid range.");
+				}
+			}
+			auto& rectangle = mLighting.mRectangle;
+			if (flag == L"--rect-position")
+			{
+				rectangle.mPosition = {values[0], values[1], values[2]};
+			}
+			else if (flag == L"--rect-size")
+			{
+				rectangle.mWidth = values[0];
+				rectangle.mHeight = values[1];
+			}
+			else if (flag == L"--rect-orientation")
+			{
+				rectangle.mAzimuth = values[0];
+				rectangle.mElevation = values[1];
+			}
+			else if (flag == L"--rect-color")
+			{
+				rectangle.mColor = values;
+			}
+			else
+			{
+				rectangle.mRadiance = values[0];
+			}
+			continue;
+		}
 		if (flag == L"--meshlet-colors")
 		{
 			mMeshletColors = true;
@@ -200,7 +272,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -534,6 +606,20 @@ void UsdKitchen::drawGui()
 				mStatus = error.what();
 			}
 		}
+	}
+	if (ImGui::CollapsingHeader("Rectangle light", mLighting.mRectangle.mEnabled ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+	{
+		auto& rectangle = mLighting.mRectangle;
+		ImGui::Checkbox("Enable rectangle", &rectangle.mEnabled);
+		ImGui::Checkbox("Rectangle NEE / MIS", &rectangle.mMis);
+		ImGui::DragFloat3("Rectangle position (m)", &rectangle.mPosition.x, mRadius * 0.01f);
+		ImGui::SliderFloat("Rectangle width (m)", &rectangle.mWidth, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat("Rectangle height (m)", &rectangle.mHeight, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat("Rectangle azimuth", &rectangle.mAzimuth, -180.0f, 180.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::SliderFloat("Rectangle elevation", &rectangle.mElevation, -90.0f, 90.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::ColorEdit3("Rectangle color (linear)", rectangle.mColor.data(), ImGuiColorEditFlags_Float);
+		ImGui::SliderFloat("Rectangle radiance", &rectangle.mRadiance, 0.0f, 10000.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+		ImGui::TextWrapped("One-sided emitter with an opaque back. Size changes total power at fixed radiance. Rectangle shadows are always enabled.");
 	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{
