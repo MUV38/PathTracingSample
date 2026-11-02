@@ -11,4 +11,5 @@ struct PathTracing
 	bool mEnvironmentMis = true;
 	bool mEmissiveMis = true;
 	bool mMultipleScattering = true;
+	bool mRussianRoulette = true;
 };

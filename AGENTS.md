@@ -16,6 +16,7 @@ if文で1行で終わる実行コードも{}で囲い、それぞれ改行する
 スクリーンショットによる表示確認と、入力・操作の動作確認は区別し、未確認の項目は作業報告に明記すること
 詳しい実行例はREADME.mdの「スクリーンショット」を参照すること
 UsdKitchenの間接照明・IBLを確認するときは `--samples 128 --screenshot <保存先.png>` などで蓄積を待つこと。既定の数フレーム撮影だけで収束を評価しないこと
+Russian Rouletteの継続確率・重み・適用位置を変更した場合はDebug / Releaseの `tests/RunRussianRoulette.ps1 -Configuration <構成>` を実行し、RR有無のPNGを開いて確認すること。検証範囲は `tests/RussianRoulette.md` を参照すること
 IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapTests.exe build/checks` を実行すること
 IBLのサンプリング分布・NEE・MISを変更した場合もEnvironmentMapTestsとRunWhiteFurnaceを両構成で実行し、`--no-ibl-mis` と同じサンプル数で画像を比較すること
 UsdKitchenのBRDF評価・サンプリングを変更した場合はDebug / Releaseの `tests/RunWhiteFurnace.ps1 -Configuration <構成>` を実行し、出力PNGも確認すること。判定範囲と許容誤差は `tests/WhiteFurnace.md` を参照すること

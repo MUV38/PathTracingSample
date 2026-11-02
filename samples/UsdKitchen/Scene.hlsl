@@ -2,6 +2,7 @@
 #include "EnvironmentSampling.hlsli"
 #include "RectangleLight.hlsli"
 #include "MeshLight.hlsli"
+#include "RussianRoulette.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -54,7 +55,7 @@ cbuffer SceneConstants : register(b0)
 	uint meshLightCount;
 	uint emissiveMis;
 	uint multipleScattering;
-	float padding3;
+	uint russianRoulette;
 };
 struct Payload
 {
@@ -376,6 +377,15 @@ void RGSMain()
 			{
 				break;
 			}
+			throughput *= weight;
+			float survival = pathSurvivalProbability(throughput, depth + 1u, russianRoulette != 0);
+			if (survival < 1.0f)
+			{
+				if (!surviveRoulette(throughput, survival, random(state)))
+				{
+					break;
+				}
+			}
 			missWeight = 1.0f;
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
 			if (environmentMis != 0 && environmentIntensity > 0.0f && !delta)
@@ -395,7 +405,6 @@ void RGSMain()
 				evaluateBsdf(surface, view, nextDirection, previousBsdfPdf);
 			}
 			ray.Direction = nextDirection;
-			throughput *= weight;
 			ray.Origin = offsetOrigin(payload.position, payload.geometricNormal);
 			ray.TMin = 0.0f;
 		}

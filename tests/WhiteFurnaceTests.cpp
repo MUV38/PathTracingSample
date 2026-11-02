@@ -357,6 +357,67 @@ std::vector<Test> testCases()
 	}
 	return tests;
 }
+void checkRussianRoulette(const std::filesystem::path& directory, bool warp)
+{
+	const std::array<std::array<float,3>,7> attenuation{{
+		{1,1,1}, {0.5f,0.5f,0.5f}, {0.1f,0.2f,0.3f}, {1,0.05f,0},
+		{1.2f,0.5f,0.1f}, {0.001f,0.001f,0.001f}, {0,0,0}}};
+	std::vector<Test> cases;
+	for (const auto& color : attenuation)
+	{
+		for (uint32_t flags : {64u, 192u})
+		{
+			cases.push_back({{color, 0, 0.5f, 0.5f, 1, flags}, "roulette", {}});
+		}
+	}
+	const auto results = integrate(cases, warp);
+	std::ofstream csv(directory / L"roulette.csv");
+	csv << "case,enabled,channel,attenuation,mean,expected,standard_error,mean_vertices,terminated_fraction,pass\n" << std::setprecision(9);
+	size_t failures = 0;
+	for (size_t index = 0; index < cases.size(); ++index)
+	{
+		const bool enabled = index % 2 == 0;
+		const auto& result = results[index];
+		const auto& baseline = results[index + (enabled ? 1 : 0)];
+		const auto& color = attenuation[index / 2];
+		const float maximum = *std::max_element(color.begin(), color.end());
+		for (size_t axis = 0; axis < 3; ++axis)
+		{
+			double expected = 0, weight = 1;
+			for (unsigned bounce = 0; bounce < 8; ++bounce)
+			{
+				expected += weight;
+				weight *= color[axis];
+			}
+			const double error = std::sqrt(result.mVariance[axis] / sampleCount);
+			const double combinedError = std::sqrt((result.mVariance[axis] + baseline.mVariance[axis]) / sampleCount);
+			bool pass = result.mInvalid == 0 && std::isfinite(result.mMean[axis]) && std::isfinite(error)
+				&& std::abs(result.mMean[axis] - expected) <= 0.0005 + 6 * error
+				&& std::abs(result.mMean[axis] - baseline.mMean[axis]) <= 0.0005 + 6 * combinedError;
+			if (!enabled || maximum >= 1)
+			{
+				pass &= result.mReference[0] == (maximum == 0 ? 1.0f : 8.0f);
+			}
+			else if (maximum > 0 && maximum < 0.9f)
+			{
+				pass &= result.mReference[0] < 5 && result.mRejectionRate > 0.9f;
+			}
+			csv << index / 2 << ',' << enabled << ',' << axis << ',' << color[axis] << ',' << result.mMean[axis] << ','
+				<< expected << ',' << error << ',' << result.mReference[0] << ',' << result.mRejectionRate << ',' << pass << '\n';
+			if (!pass)
+			{
+				++failures;
+				std::cerr << "Russian roulette FAIL: case=" << index / 2 << " enabled=" << enabled << " channel=" << axis << '\n';
+			}
+		}
+	}
+	csv.close();
+	if (!csv || failures)
+	{
+		throw std::runtime_error("Russian roulette failed; inspect roulette.csv.");
+	}
+	std::cout << "Russian roulette passed: " << cases.size() << " cases, " << sampleCount << " paths/case.\n";
+}
 void writeRectangleFixtures(const std::filesystem::path& directory)
 {
 	SceneData scene;
@@ -499,6 +560,7 @@ int wmain(int count, wchar_t** arguments)
 			throw std::runtime_error("White furnace failed; inspect furnace.csv (" + std::to_string(failures) + " failed channels).");
 		}
 		std::cout << "White furnace passed: " << tests.size() << " cases, " << sampleCount << " samples/case. CSV: " << (directory / L"furnace.csv").string() << '\n';
+		checkRussianRoulette(directory, count == 3);
 		return 0;
 	}
 	catch (const std::exception& error)
