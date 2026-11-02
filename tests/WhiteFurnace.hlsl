@@ -1,3 +1,4 @@
+#define PBR_COMPARE_NDF
 #include "../samples/UsdKitchen/Pbr.hlsli"
 #include "../samples/UsdKitchen/EnvironmentSampling.hlsli"
 #include "../samples/UsdKitchen/RectangleLight.hlsli"
@@ -10,7 +11,7 @@ struct TestCase
 	float roughness;
 	float specular;
 	float noV;
-	uint flags; // 1: cosine reference, 2: MIS, 4: finite rectangle target, 8: lightTriangle mesh sampler.
+	uint flags; // 1: cosine reference, 2: MIS, 4: rectangle, 8: mesh sampler, 16: legacy NDF.
 };
 struct Result
 {
@@ -21,7 +22,7 @@ struct Result
 	float3 reference;
 	uint referenceInvalid;
 	float3 referenceVariance;
-	float padding;
+	float rejectionRate;
 };
 StructuredBuffer<TestCase> cases : register(t0);
 StructuredBuffer<float2> environmentDistribution : register(t1);
@@ -38,6 +39,7 @@ groupshared float3 referenceSquares[64];
 groupshared uint errors[64];
 groupshared uint referenceErrors[64];
 groupshared float maxima[64];
+groupshared uint rejections[64];
 
 float random(inout uint state)
 {
@@ -56,6 +58,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	surface.roughness = input.roughness;
 	surface.specular = input.specular;
 	surface.occlusion = 1;
+	surface.useNdf = (input.flags & 16u) != 0;
 	float3 view = float3(sqrt(1.0f - input.noV * input.noV), 0, input.noV);
 	RectangleLight rectangle = (RectangleLight)0;
 	rectangle.center = float3(0,0,2);
@@ -69,6 +72,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	uint state = (group.x + 1u) * 277803737u + (thread + 1u) * 747796405u;
 	float3 sum = 0, sumSquared = 0, reference = 0, referenceSquared = 0;
 	uint invalid = 0, referenceInvalid = 0;
+	uint rejected = 0;
 	if (rectangleTarget)
 	{
 		float distance;
@@ -97,6 +101,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		}
 		if (!accepted)
 		{
+			++rejected;
 			weight = 0;
 		}
 		float hitDistance = 0;
@@ -190,6 +195,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	errors[thread] = invalid;
 	referenceErrors[thread] = referenceInvalid;
 	maxima[thread] = maximum;
+	rejections[thread] = rejected;
 	GroupMemoryBarrierWithGroupSync();
 	for (uint stride = 32; stride > 0; stride /= 2)
 	{
@@ -202,6 +208,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 			errors[thread] += errors[thread + stride];
 			referenceErrors[thread] += referenceErrors[thread + stride];
 			maxima[thread] = max(maxima[thread], maxima[thread + stride]);
+			rejections[thread] += rejections[thread + stride];
 		}
 		GroupMemoryBarrierWithGroupSync();
 	}
@@ -216,7 +223,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		result.invalid = errors[0];
 		result.referenceInvalid = referenceErrors[0];
 		result.maxWeight = maxima[0];
-		result.padding = 0;
+		result.rejectionRate = float(rejections[0]) / count;
 		results[group.x] = result;
 	}
 }
