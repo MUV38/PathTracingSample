@@ -77,6 +77,7 @@ USDの `useSpecularWorkflow=1` は未対応としてエラーにします。テ�
 
 利用者が配置したPixar Kitchen Set（同梱VERSION.txtの2022-07-21版）は、通常版とUSDネイティブインスタンス版の両方をDebug / Releaseで変換・表示確認しています。
 原本はGit管理外の `assets/Source/Kitchen_set/`、検証結果は `build/checks/kitchen-<構成>/` です。
+通常利用の出力は `assets/local/Kitchen_set.ptscene` にします。例: `UsdConverter.exe assets/Source/Kitchen_set/Kitchen_set.usd assets/local/Kitchen_set.ptscene`。このファイルがあればUsdKitchenの初期表示で優先します。テストスクリプトの出力先は従来どおりbuildです。
 `tests/RunKitchenSet.ps1 -Configuration <構成>` は変換終了コード、描画終了コード、通常版とインスタンス版の出力SHA256一致を検査し、統計・ログ・PNGを保存します。
 保存PNGを開いて表示内容も確認してください。Subdivisionは既存仕様どおり制御ケージの出力です。
 

@@ -56,6 +56,7 @@ private:
 	std::filesystem::path mModelPath;
 	std::filesystem::path mStartupUsd;
 	std::filesystem::path mConfiguredConverter;
+	std::filesystem::path mConfiguredOutput;
 	std::filesystem::path mPendingBinary;
 	std::filesystem::path mLogPath;
 	std::array<char, 4096> mUsdInput{};

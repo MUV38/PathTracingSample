@@ -72,7 +72,7 @@ Agility SDKは将来のCLAS利用を見据えた指定版を維持していま�
 ## USDモデルとKitchen Set
 
 `UsdKitchen` は `.ptscene` 独自バイナリだけを読み込み、OpenUSDにはリンクしません。
-初期表示は同梱の自作 **Preview Room**（192三角形）です。Pixar Kitchen Setは含みません。
+初期表示はGit管理外の `assets/local/Kitchen_set.ptscene` があればKitchen Setを優先し、なければ同梱の自作 **Preview Room**（192三角形）を表示します。Pixar Kitchen Set自体は同梱しません。
 利用者が `assets/Source/Kitchen_set/` に配置した実データは、通常版・インスタンス版ともDebug / Releaseで変換・描画を確認済みです。
 このフォルダもGit管理外です。再確認には `tests/RunKitchenSet.ps1 -Configuration Debug` またはReleaseを使用できます。
 変換ツールはmeshoptimizer **v1.3** で最大64頂点・126三角形のmeshletへ分割します。

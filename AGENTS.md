@@ -38,7 +38,7 @@ OpenUSD SDKは `tools/UsdConverter/UsdConverter.slnx` の独立した変換プ�
 表示サンプルは `common/SceneFile` の変換済み `.ptscene` を読み、USD SDKやPythonに依存させないこと
 `.ptscene` はPBRマテリアルを含むmeshlet専用v3形式とし、v1 / v2互換処理は追加しないこと。meshoptimizerは外部変換ツールとテストだけで使用し、表示時の再分割は行わないこと
 入手したKitchen Setの原本と変換データは `assets/local/` または `build/` に置き、コミットしないこと。同梱のPreview Roomは自作モデルでありKitchen Setと混同しないこと
-利用者が `assets/Source/Kitchen_set/` に配置した原本はその場所で読み、移動しないこと。このフォルダもGit管理対象外とし、変換結果は `build/` 配下へ保存すること。実データの確認は `tests/RunKitchenSet.ps1 -Configuration <構成>` を使用し、通常版・インスタンス版の変換と保存画像を確認すること
+利用者が `assets/Source/Kitchen_set/` に配置した原本はその場所で読み、移動しないこと。このフォルダもGit管理対象外とする。通常利用のKitchen Setは `assets/local/Kitchen_set.ptscene` に保存し、初期表示でPreview Roomより優先すること。変換テストの結果・ログ・画像は `build/checks/` に保存してよい。実データの変換確認は `tests/RunKitchenSet.ps1 -Configuration <構成>` を使用すること
 独自形式を変更した場合はバージョン互換性を明示し、Debug / ReleaseのSceneFileTestsを実行すること
 変換ツールを変更した場合は自作USDフィクスチャを変換してSceneFileTestsの追加引数で検証すること。手順はtools/UsdConverter/README.mdを参照すること
 
