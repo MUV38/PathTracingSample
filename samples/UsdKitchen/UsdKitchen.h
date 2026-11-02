@@ -38,7 +38,7 @@ private:
 	float mRadius = 1.0f;
 	float mViewportLeft = 0.0f;
 	float mExposure = 1.0f;
-	bool mHeadlight = true;
+	Lighting mLighting;
 	bool mMeshletColors = false;
 	bool mHasScene = false;
 	bool mStartupConversion = false;

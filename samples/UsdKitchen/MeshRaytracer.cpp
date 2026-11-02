@@ -69,11 +69,18 @@ struct SceneConstants
 	DirectX::XMFLOAT3 mForward;
 	float mMeshletColors = 0.0f;
 	std::array<float, 3> mBackground;
-	float mPadding2 = 0.0f;
-	std::array<float, 3> mLightDirection;
 	float mExposure = 1.0f;
+	std::array<float, 3> mLightDirection;
+	float mShadows = 1.0f;
+	DirectX::XMFLOAT3 mLightPosition;
+	float mPointLight = 0.0f;
+	std::array<float, 3> mLightColor;
+	float mLightStrength = 4.0f;
+	float mAmbient = 0.15f;
+	float mShadowBias = 0.0002f;
+	std::array<float, 2> mPadding{};
 };
-static_assert(sizeof(SceneConstants) == 24 * sizeof(float));
+static_assert(sizeof(SceneConstants) == 36 * sizeof(float));
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -327,7 +334,7 @@ void MeshRaytracer::resizeOutput(UINT width, UINT height)
 	mHeight = height;
 }
 
-void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, bool headlight, float exposure, bool meshletColors,
+void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
 	if (mWidth != renderer.width() || mHeight != renderer.height())
@@ -345,7 +352,17 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mAspect = (std::max)(1.0f, static_cast<float>(mWidth) - viewportLeft) / static_cast<float>(mHeight);
 	std::copy_n(renderer.clearColor().begin(), 3, constants.mBackground.begin());
 	const auto forward = camera.forward();
-	constants.mLightDirection = headlight ? std::array<float, 3>{-forward.x, -forward.y, -forward.z} : std::array<float, 3>{0.3f, 0.8f, 0.4f};
+	const float azimuth = DirectX::XMConvertToRadians(lighting.mAzimuth);
+	const float elevation = DirectX::XMConvertToRadians(lighting.mElevation);
+	constants.mLightDirection = lighting.mHeadlight ? std::array<float, 3>{-forward.x, -forward.y, -forward.z}
+		: std::array<float, 3>{std::cos(elevation) * std::sin(azimuth), std::sin(elevation), std::cos(elevation) * std::cos(azimuth)};
+	constants.mLightPosition = lighting.mPosition;
+	constants.mPointLight = lighting.mPointLight ? 1.0f : 0.0f;
+	constants.mShadows = lighting.mShadows ? 1.0f : 0.0f;
+	constants.mLightColor = lighting.mColor;
+	constants.mLightStrength = lighting.mPointLight ? lighting.mPointStrength : lighting.mDirectionalStrength;
+	constants.mAmbient = lighting.mAmbient;
+	constants.mShadowBias = lighting.mShadowBias;
 	constants.mExposure = exposure;
 	constants.mMeshletColors = meshletColors ? 1.0f : 0.0f;
 	ComPtr<ID3D12GraphicsCommandList4> commands;

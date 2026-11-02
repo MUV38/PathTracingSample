@@ -9,7 +9,7 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | --- | --- | --- |
 | PathTracingSample | 画面クリア、ImGui、スクリーンショット | DirectX 12。ハードウェアが利用できなければWARP |
 | DxrCube | 12枚の三角形のキューブをDXRで描画 | DXR Tier 1.0以上に対応するGPUとドライバ |
-| UsdKitchen | meshoptimizerで変換したmeshletバイナリをDXRで描画。アプリから変換ツールを起動可能 | DXR Tier 1.1以上 |
+| UsdKitchen | meshletバイナリのDXR描画、方向光・点光源による直接照明と影、アプリ内変換 | DXR Tier 1.1以上 |
 | SampleFramework | 上記で共有する静的ライブラリ | 単独では起動しません |
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 | SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
@@ -19,6 +19,10 @@ DispatchRays()からRay Generation / Miss / Closest Hitシェーダーを実行�
 Closest Hitで面の法線に応じた拡散照明を計算します。カメラの方位角・仰角・距離と色をImGuiから変更できます。
 リサイズ時はDXR出力テクスチャを再作成し、DXR描画後にImGuiを重ねます。
 単発の一次レイによるDXR入門サンプルです。Path Tracingの多重反射・蓄積、影、CLASはまだ実装していません。
+
+UsdKitchenはmeshletを読み込み、Lambert直接照明とRayQueryによるハードシャドウを描画します。
+ImGuiのDirect lightingで方向光／点光源、色・強度・位置、影、補助光を調整できます。
+詳しくは [UsdKitchenの照明設定](samples/UsdKitchen/README.md#直接照明) を参照してください。
 
 ## ビルドと実行
 
