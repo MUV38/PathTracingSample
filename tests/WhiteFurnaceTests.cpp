@@ -49,7 +49,7 @@ struct Result
 	std::array<float,3> mReference;
 	uint32_t mReferenceInvalid;
 	std::array<float,3> mReferenceVariance;
-	float mPadding;
+	float mRejectionRate;
 };
 static_assert(sizeof(Result) == 64);
 struct Test
@@ -313,6 +313,14 @@ std::vector<Test> testCases()
 		mis.mName = "mis-" + mis.mName;
 		tests.push_back(mis);
 	}
+	const size_t vndfCount = tests.size();
+	for (size_t index = 0; index < vndfCount; ++index)
+	{
+		auto ndf = tests[index];
+		ndf.mData.mFlags |= 16u;
+		ndf.mName = "ndf-" + ndf.mName;
+		tests.push_back(ndf);
+	}
 	return tests;
 }
 void writeRectangleFixtures(const std::filesystem::path& directory)
@@ -392,7 +400,7 @@ int wmain(int count, wchar_t** arguments)
 		const auto tests = testCases();
 		const auto results = integrate(tests, count == 3);
 		std::ofstream csv(directory / L"furnace.csv");
-		csv << "case,metallic,roughness,specular,noV,channel,reflectance,standard_error,reference,reference_error,max_weight,invalid,pass\n";
+		csv << "case,metallic,roughness,specular,noV,channel,reflectance,standard_error,reference,reference_error,max_weight,invalid,variance,rejection_rate,pass\n";
 		csv << std::setprecision(9);
 		size_t failures = 0;
 		for (size_t index = 0; index < tests.size(); ++index)
@@ -419,12 +427,26 @@ int wmain(int count, wchar_t** arguments)
 				if (test.mData.mFlags & 2u)
 				{
 					// MIS cases follow the corresponding BSDF-only cases in the same order.
-					const auto& baseline = results[index - tests.size() / 2];
+					const auto& baseline = results[index - tests.size() / 4];
 					const double combinedError = std::sqrt((result.mVariance[axis] + baseline.mVariance[axis]) / sampleCount);
 					pass &= std::abs(mean - baseline.mMean[axis]) <= 0.005 + 6 * combinedError;
 				}
+				if (test.mData.mFlags & 16u)
+				{
+					const auto& vndf = results[index - tests.size() / 2];
+					const double combinedError = std::sqrt((result.mVariance[axis] + vndf.mVariance[axis]) / sampleCount);
+					pass &= std::abs(mean - vndf.mMean[axis]) <= 0.005 + 6 * combinedError;
+					// A white rough metal at grazing incidence is the key VNDF case.
+					// Compare BSDF-only samples under uniform illumination, without NEE noise.
+					if (test.mData.mFlags == 17u && test.mData.mMetallic == 1 && test.mData.mRoughness == 0.6f && test.mData.mNoV == 0.02f)
+					{
+						pass &= vndf.mVariance[axis] < 0.1f * result.mVariance[axis]
+							&& vndf.mRejectionRate < 0.1f * result.mRejectionRate;
+					}
+				}
 				csv << test.mName << ',' << test.mData.mMetallic << ',' << test.mData.mRoughness << ',' << test.mData.mSpecular << ',' << test.mData.mNoV << ','
-					<< axis << ',' << mean << ',' << error << ',' << result.mReference[axis] << ',' << referenceError << ',' << result.mMaxWeight << ',' << result.mInvalid << ',' << pass << '\n';
+					<< axis << ',' << mean << ',' << error << ',' << result.mReference[axis] << ',' << referenceError << ',' << result.mMaxWeight << ',' << result.mInvalid
+					<< ',' << result.mVariance[axis] << ',' << result.mRejectionRate << ',' << pass << '\n';
 				if (!pass)
 				{
 					++failures;

@@ -19,6 +19,9 @@ struct Surface
 	float roughness;
 	float specular;
 	float occlusion;
+#ifdef PBR_COMPARE_NDF
+	bool useNdf; // Numerical regression tests only; production always uses VNDF.
+#endif
 };
 static const float pbrPi = 3.14159265359f;
 
@@ -89,7 +92,16 @@ float3 evaluateBsdf(Surface surface, float3 view, float3 direction, out float pd
 	float lambdaV = noL * sqrt(a2 + (1.0f - a2) * noV * noV);
 	float lambdaL = noV * sqrt(a2 + (1.0f - a2) * noL * noL);
 	float visibility = 0.5f / max(lambdaV + lambdaL, 0.00000001f);
-	pdf += pSpecular * d * noH / (4.0f * voH);
+	// Visible-normal PDF D(H) G1(V) (V.H) / (N.V), followed by the
+	// reflection Jacobian 1 / (4 V.H). This form stays finite at grazing views.
+	float specularPdf = d / (2.0f * (noV + sqrt(a2 + (1.0f - a2) * noV * noV)));
+#ifdef PBR_COMPARE_NDF
+	if (surface.useNdf)
+	{
+		specularPdf = d * noH / (4.0f * voH);
+	}
+#endif
+	pdf += pSpecular * specularPdf;
 	return diffuse + d * visibility * fresnel;
 }
 float3 tangentToWorld(float3 normal, float3 local)
@@ -111,10 +123,32 @@ bool sampleBsdf(Surface surface, float3 view, float3 u, out float3 direction, ou
 			return dot(direction, surface.geometricNormal) > 0.0f;
 		}
 		float alpha = pow(max(surface.roughness, 0.02f), 2.0f);
-		float cosine = sqrt((1.0f - u.x) / (1.0f - u.x + alpha * alpha * u.x));
-		float sine = sqrt(max(0.0f, 1.0f - cosine * cosine));
+		// Heitz 2018: sample the projected hemisphere of the stretched view,
+		// then undo the ellipsoid stretch to obtain a visible GGX normal.
+		float3 tangent = normalize(cross(abs(surface.normal.y) < 0.999f ? float3(0,1,0) : float3(1,0,0), surface.normal));
+		float3 bitangent = cross(surface.normal, tangent);
+		float3 localView = float3(dot(view, tangent), dot(view, bitangent), dot(view, surface.normal));
+		float3 stretchedView = normalize(float3(alpha * localView.xy, localView.z));
+		float lengthSquared = dot(stretchedView.xy, stretchedView.xy);
+		float3 axis1 = lengthSquared > 0.0f ? float3(-stretchedView.y, stretchedView.x, 0) * rsqrt(lengthSquared) : float3(1,0,0);
+		float3 axis2 = cross(stretchedView, axis1);
+		float radius = sqrt(u.x);
 		float phi = 2.0f * pbrPi * u.y;
-		float3 halfVector = tangentToWorld(surface.normal, float3(sine * cos(phi), sine * sin(phi), cosine));
+		float x = radius * cos(phi);
+		float y = radius * sin(phi);
+		float blend = 0.5f * (1.0f + stretchedView.z);
+		y = (1.0f - blend) * sqrt(max(0.0f, 1.0f - x * x)) + blend * y;
+		float3 projectedNormal = x * axis1 + y * axis2 + sqrt(max(0.0f, 1.0f - x * x - y * y)) * stretchedView;
+		float3 localHalf = normalize(float3(alpha * projectedNormal.xy, max(0.0f, projectedNormal.z)));
+		float3 halfVector = normalize(tangent * localHalf.x + bitangent * localHalf.y + surface.normal * localHalf.z);
+#ifdef PBR_COMPARE_NDF
+		if (surface.useNdf)
+		{
+			float cosine = sqrt((1.0f - u.x) / (1.0f - u.x + alpha * alpha * u.x));
+			float sine = sqrt(max(0.0f, 1.0f - cosine * cosine));
+			halfVector = tangentToWorld(surface.normal, float3(sine * cos(phi), sine * sin(phi), cosine));
+		}
+#endif
 		if (dot(view, halfVector) <= 0.0f)
 		{
 			return false;
