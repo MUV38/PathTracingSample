@@ -98,7 +98,7 @@ struct SceneConstants
 	uint32_t mMeshLightCount = 0;
 	uint32_t mEmissiveMis = 1;
 	uint32_t mMultipleScattering = 1;
-	float mPadding3 = 0;
+	uint32_t mRussianRoulette = 1;
 };
 static_assert(sizeof(SceneConstants) == 64 * sizeof(float));
 }
@@ -585,6 +585,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mMeshLightCount = mEmissiveTriangleCount > 0 ? static_cast<uint32_t>(mMeshLightData.size()) : 0;
 	constants.mEmissiveMis = tracing.mEmissiveMis && !meshletColors ? 1u : 0u;
 	constants.mMultipleScattering = tracing.mMultipleScattering ? 1u : 0u;
+	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	const auto& rectangle = lighting.mRectangle;
 	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
 		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
