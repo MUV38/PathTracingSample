@@ -3,6 +3,8 @@
 #include "SceneFile.h"
 #include "Camera.h"
 #include "Lighting.h"
+#include "EnvironmentMap.h"
+#include "PathTracing.h"
 
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -14,7 +16,10 @@ class MeshRaytracer final
 public:
 	void initialize(Renderer& renderer);
 	void load(Renderer& renderer, const SceneData& scene);
-	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, float exposure, bool meshletColors,
+	void loadEnvironment(Renderer& renderer, const EnvironmentMap& environment);
+	void resetAccumulation() { mResetAccumulation = true; }
+	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
+	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 		ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer);
 
 private:
@@ -34,7 +39,13 @@ private:
 	ComPtr<ID3D12StateObject> mPipeline;
 	ComPtr<ID3D12Resource> mShaderTable;
 	ComPtr<ID3D12Resource> mOutput;
+	ComPtr<ID3D12Resource> mAccumulation;
+	ComPtr<ID3D12Resource> mEnvironment;
 	ComPtr<ID3D12DescriptorHeap> mSrvUavHeap;
 	UINT mWidth = 0;
 	UINT mHeight = 0;
+	uint32_t mAccumulatedFrames = 0;
+	uint32_t mLastSamplesPerFrame = 1;
+	bool mResetAccumulation = true;
+	std::vector<uint8_t> mPreviousConstants;
 };

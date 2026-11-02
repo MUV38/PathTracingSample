@@ -79,8 +79,14 @@ struct SceneConstants
 	float mAmbient = 0.15f;
 	float mShadowBias = 0.0002f;
 	std::array<float, 2> mPadding{};
+	uint32_t mFrameIndex = 0;
+	uint32_t mMaxBounces = 3;
+	uint32_t mSamplesPerFrame = 1;
+	float mEnvironmentIntensity = 1.0f;
+	float mEnvironmentRotation = 0.0f;
+	std::array<float, 3> mPadding2{};
 };
-static_assert(sizeof(SceneConstants) == 36 * sizeof(float));
+static_assert(sizeof(SceneConstants) == 44 * sizeof(float));
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -96,7 +102,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 	createShaderTable();
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	heap.NumDescriptors = 1;
+	heap.NumDescriptors = 3;
 	heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	check(mDevice->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&mSrvUavHeap)), "Create scene UAV heap");
 	resizeOutput(renderer.width(), renderer.height());
@@ -217,14 +223,92 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	mMeshletTriangles = std::move(triangles);
 	mBlas = std::move(blas);
 	mTlas = std::move(tlas);
+	resetAccumulation();
+}
+
+void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& environment)
+{
+	if (!environment.mWidth || !environment.mHeight || environment.mWidth > 16384 || environment.mHeight > 16384
+		|| static_cast<uint64_t>(environment.mWidth) * environment.mHeight > 16777216
+		|| environment.mPixels.size() != static_cast<size_t>(environment.mWidth) * environment.mHeight)
+	{
+		throw std::runtime_error("Invalid environment texture dimensions.");
+	}
+	for (const auto& pixel : environment.mPixels)
+	{
+		for (float value : pixel)
+		{
+			if (!std::isfinite(value) || value < 0 || value > 1e20f)
+			{
+				throw std::runtime_error("Environment contains invalid or excessively large radiance.");
+			}
+		}
+	}
+	D3D12_HEAP_PROPERTIES heap{};
+	heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+	D3D12_RESOURCE_DESC description{};
+	description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	description.Width = environment.mWidth;
+	description.Height = environment.mHeight;
+	description.DepthOrArraySize = 1;
+	description.MipLevels = 1;
+	description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	description.SampleDesc.Count = 1;
+	ComPtr<ID3D12Resource> texture;
+	check(mDevice->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &description,
+		D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture)), "Create IBL texture");
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+	UINT64 uploadSize = 0;
+	mDevice->GetCopyableFootprints(&description, 0, 1, 0, &footprint, nullptr, nullptr, &uploadSize);
+	std::vector<uint8_t> padded(static_cast<size_t>(uploadSize));
+	const size_t rowSize = environment.mWidth * sizeof(environment.mPixels[0]);
+	for (uint32_t y = 0; y < environment.mHeight; ++y)
+	{
+		std::memcpy(padded.data() + footprint.Offset + static_cast<size_t>(y) * footprint.Footprint.RowPitch,
+			environment.mPixels.data() + static_cast<size_t>(y) * environment.mWidth, rowSize);
+	}
+	auto staging = uploadBuffer(mDevice.Get(), padded.data(), padded.size());
+	ComPtr<ID3D12CommandAllocator> allocator;
+	ComPtr<ID3D12GraphicsCommandList> commands;
+	check(mDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)), "Create IBL allocator");
+	check(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands)), "Create IBL command list");
+	D3D12_TEXTURE_COPY_LOCATION source{}, destination{};
+	source.pResource = staging.Get();
+	source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+	source.PlacedFootprint = footprint;
+	destination.pResource = texture.Get();
+	destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+	D3D12_RESOURCE_BARRIER barrier{};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Transition = {texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
+	commands->ResourceBarrier(1, &barrier);
+	check(commands->Close(), "Close IBL upload");
+	ID3D12CommandList* lists[] = {commands.Get()};
+	renderer.commandQueue()->ExecuteCommandLists(1, lists);
+	renderer.waitForGpu();
+	D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+	view.Format = description.Format;
+	view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	view.Texture2D.MipLevels = 1;
+	auto handle = mSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+	handle.ptr += 2 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	mDevice->CreateShaderResourceView(texture.Get(), &view, handle);
+	mEnvironment = std::move(texture);
+	resetAccumulation();
 }
 
 void MeshRaytracer::createPipeline()
 {
 	D3D12_DESCRIPTOR_RANGE outputRange{};
 	outputRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	outputRange.NumDescriptors = 1;
-	D3D12_ROOT_PARAMETER parameters[7]{};
+	outputRange.NumDescriptors = 2;
+	D3D12_DESCRIPTOR_RANGE environmentRange{};
+	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	environmentRange.NumDescriptors = 1;
+	environmentRange.BaseShaderRegister = 5;
+	D3D12_ROOT_PARAMETER parameters[8]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -241,9 +325,21 @@ void MeshRaytracer::createPipeline()
 	parameters[5].Descriptor.ShaderRegister = 3;
 	parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[6].Descriptor.ShaderRegister = 4;
+	parameters[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	parameters[7].DescriptorTable.NumDescriptorRanges = 1;
+	parameters[7].DescriptorTable.pDescriptorRanges = &environmentRange;
+	D3D12_STATIC_SAMPLER_DESC sampler{};
+	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	sampler.MaxAnisotropy = 1;
+	sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+	sampler.MaxLOD = D3D12_FLOAT32_MAX;
 	D3D12_ROOT_SIGNATURE_DESC rootDescription{};
 	rootDescription.NumParameters = static_cast<UINT>(std::size(parameters));
 	rootDescription.pParameters = parameters;
+	rootDescription.NumStaticSamplers = 1;
+	rootDescription.pStaticSamplers = &sampler;
 	ComPtr<ID3DBlob> rootBlob;
 	ComPtr<ID3DBlob> errors;
 	check(D3D12SerializeRootSignature(&rootDescription, D3D_ROOT_SIGNATURE_VERSION_1, &rootBlob, &errors), "Serialize DXR root signature");
@@ -274,7 +370,7 @@ void MeshRaytracer::createPipeline()
 	hitGroup.HitGroupExport = L"CubeHitGroup";
 	hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
 	hitGroup.ClosestHitShaderImport = L"CHSMain";
-	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{3 * sizeof(float), 2 * sizeof(float)};
+	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{13 * sizeof(float), 2 * sizeof(float)};
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{1};
 	ID3D12RootSignature* globalRoot = mRootSignature.Get();
 	const D3D12_STATE_SUBOBJECT subobjects[] = {
@@ -330,13 +426,28 @@ void MeshRaytracer::resizeOutput(UINT width, UINT height)
 	view.Format = description.Format;
 	view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 	mDevice->CreateUnorderedAccessView(mOutput.Get(), nullptr, &view, mSrvUavHeap->GetCPUDescriptorHandleForHeapStart());
+	description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+	mAccumulation.Reset();
+	check(mDevice->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &description,
+		D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&mAccumulation)), "Create HDR accumulation texture");
+	view.Format = description.Format;
+	auto handle = mSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+	handle.ptr += mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	mDevice->CreateUnorderedAccessView(mAccumulation.Get(), nullptr, &view, handle);
+	resetAccumulation();
 	mWidth = width;
 	mHeight = height;
 }
 
-void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, float exposure, bool meshletColors,
+void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
+	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
+		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
+		|| !std::isfinite(tracing.mEnvironmentRotation))
+	{
+		throw std::runtime_error("Invalid path tracing settings.");
+	}
 	if (mWidth != renderer.width() || mHeight != renderer.height())
 	{
 		// The framework waits for the previous frame before resizing or reusing resources.
@@ -365,12 +476,30 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mShadowBias = lighting.mShadowBias;
 	constants.mExposure = exposure;
 	constants.mMeshletColors = meshletColors ? 1.0f : 0.0f;
+	constants.mMaxBounces = tracing.mMaxBounces;
+	constants.mSamplesPerFrame = tracing.mSamplesPerFrame;
+	constants.mEnvironmentIntensity = tracing.mEnvironmentIntensity;
+	constants.mEnvironmentRotation = DirectX::XMConvertToRadians(tracing.mEnvironmentRotation);
+	// Compare all integrator inputs except the frame index, which is still zero here.
+	if (mResetAccumulation || mPreviousConstants.size() != sizeof(constants)
+		|| std::memcmp(mPreviousConstants.data(), &constants, sizeof(constants)) != 0 || mAccumulatedFrames == UINT32_MAX)
+	{
+		mAccumulatedFrames = 0;
+		mPreviousConstants.resize(sizeof(constants));
+		std::memcpy(mPreviousConstants.data(), &constants, sizeof(constants));
+		mResetAccumulation = false;
+	}
+	constants.mFrameIndex = mAccumulatedFrames;
+	mLastSamplesPerFrame = tracing.mSamplesPerFrame;
 	ComPtr<ID3D12GraphicsCommandList4> commands;
 	check(commandList->QueryInterface(IID_PPV_ARGS(&commands)), "Query DXR command list");
 	ID3D12DescriptorHeap* heaps[] = {mSrvUavHeap.Get()};
 	commands->SetDescriptorHeaps(1, heaps);
 	commands->SetComputeRootSignature(mRootSignature.Get());
 	commands->SetComputeRootDescriptorTable(0, mSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+	auto environmentHandle = mSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+	environmentHandle.ptr += 2 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	commands->SetComputeRootDescriptorTable(7, environmentHandle);
 	commands->SetComputeRootShaderResourceView(1, mTlas->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(2, mVertices->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(4, mMeshletVertices->GetGPUVirtualAddress());
@@ -387,7 +516,12 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	dispatch.Width = mWidth;
 	dispatch.Height = mHeight;
 	dispatch.Depth = 1;
+	D3D12_RESOURCE_BARRIER accumulationBarrier{};
+	accumulationBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+	accumulationBarrier.UAV.pResource = mAccumulation.Get();
+	commands->ResourceBarrier(1, &accumulationBarrier);
 	commands->DispatchRays(&dispatch);
+	++mAccumulatedFrames;
 
 	D3D12_RESOURCE_BARRIER barriers[2]{};
 	for (auto& barrier : barriers)

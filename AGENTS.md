@@ -15,6 +15,8 @@ if文で1行で終わる実行コードも{}で囲い、それぞれ改行する
 手動撮影はImGuiの `Save screenshot (F12)` ボタンまたはF12キーを使用する。実行ファイル隣の `screenshots/` に保存される
 スクリーンショットによる表示確認と、入力・操作の動作確認は区別し、未確認の項目は作業報告に明記すること
 詳しい実行例はREADME.mdの「スクリーンショット」を参照すること
+UsdKitchenの間接照明・IBLを確認するときは `--samples 128 --screenshot <保存先.png>` などで蓄積を待つこと。既定の数フレーム撮影だけで収束を評価しないこと
+IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapTests.exe build/checks` を実行すること
 
 # サンプル構成
 ウィンドウ、DirectX 12初期化、ImGui、撮影機能は `common/` のSampleFrameworkで共有する
