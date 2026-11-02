@@ -67,7 +67,7 @@ struct SceneConstants
 	DirectX::XMFLOAT3 mUp;
 	float mViewportLeft = 0.0f;
 	DirectX::XMFLOAT3 mForward;
-	float mPadding1 = 0.0f;
+	float mMeshletColors = 0.0f;
 	std::array<float, 3> mBackground;
 	float mPadding2 = 0.0f;
 	std::array<float, 3> mLightDirection;
@@ -79,6 +79,12 @@ static_assert(sizeof(SceneConstants) == 24 * sizeof(float));
 void MeshRaytracer::initialize(Renderer& renderer)
 {
 	check(renderer.device()->QueryInterface(IID_PPV_ARGS(&mDevice)), "Query DXR device");
+	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options{};
+	check(mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options, sizeof(options)), "Query DXR tier");
+	if (options.RaytracingTier < D3D12_RAYTRACING_TIER_1_1)
+	{
+		throw std::runtime_error("The meshlet viewer requires DXR Tier 1.1 for GeometryIndex().");
+	}
 	createPipeline();
 	createShaderTable();
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
@@ -96,17 +102,42 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	auto staging = uploadBuffer(mDevice.Get(), scene.mVertices.data(), static_cast<size_t>(byteSize));
 	auto vertices = createBuffer(mDevice.Get(), byteSize, D3D12_HEAP_TYPE_DEFAULT,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
-	D3D12_RAYTRACING_GEOMETRY_DESC geometry{};
-	geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-	geometry.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-	geometry.Triangles.VertexBuffer = {vertices->GetGPUVirtualAddress(), sizeof(SceneVertex)};
-	geometry.Triangles.VertexCount = static_cast<UINT>(scene.mVertices.size());
-	geometry.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+	const auto triangleIndices = meshletTriangleIndices(scene);
+	auto indexStaging = uploadBuffer(mDevice.Get(), triangleIndices.data(), triangleIndices.size() * sizeof(uint32_t));
+	auto indices = createBuffer(mDevice.Get(), triangleIndices.size() * sizeof(uint32_t), D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	auto meshletStaging = uploadBuffer(mDevice.Get(), scene.mMeshlets.data(), scene.mMeshlets.size() * sizeof(SceneMeshlet));
+	auto meshlets = createBuffer(mDevice.Get(), scene.mMeshlets.size() * sizeof(SceneMeshlet), D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	auto referenceStaging = uploadBuffer(mDevice.Get(), scene.mMeshletVertices.data(), scene.mMeshletVertices.size() * sizeof(uint32_t));
+	auto references = createBuffer(mDevice.Get(), scene.mMeshletVertices.size() * sizeof(uint32_t), D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	// ByteAddressBuffer loads 32-bit words; only the final word needs padding.
+	auto paddedTriangles = scene.mMeshletTriangles;
+	paddedTriangles.resize((paddedTriangles.size() + 3) & ~size_t(3), 0);
+	auto triangleStaging = uploadBuffer(mDevice.Get(), paddedTriangles.data(), paddedTriangles.size());
+	auto triangles = createBuffer(mDevice.Get(), paddedTriangles.size(), D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries;
+	geometries.reserve(scene.mMeshlets.size());
+	for (const auto& meshlet : scene.mMeshlets)
+	{
+		D3D12_RAYTRACING_GEOMETRY_DESC geometry{};
+		geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+		geometry.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+		geometry.Triangles.VertexBuffer = {vertices->GetGPUVirtualAddress(), sizeof(SceneVertex)};
+		geometry.Triangles.VertexCount = static_cast<UINT>(scene.mVertices.size());
+		geometry.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+		geometry.Triangles.IndexBuffer = indices->GetGPUVirtualAddress() + meshlet.mTriangleOffset * sizeof(uint32_t);
+		geometry.Triangles.IndexCount = meshlet.mTriangleCount * 3;
+		geometry.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+		geometries.push_back(geometry);
+	}
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInputs{};
 	blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
 	blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-	blasInputs.NumDescs = 1;
-	blasInputs.pGeometryDescs = &geometry;
+	blasInputs.NumDescs = static_cast<UINT>(geometries.size());
+	blasInputs.pGeometryDescs = geometries.data();
 	blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs{};
 	tlasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
@@ -138,10 +169,22 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	check(mDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
 		IID_PPV_ARGS(&commands)), "Create scene command list");
 	commands->CopyResource(vertices.Get(), staging.Get());
+	commands->CopyResource(indices.Get(), indexStaging.Get());
+	commands->CopyResource(meshlets.Get(), meshletStaging.Get());
+	commands->CopyResource(references.Get(), referenceStaging.Get());
+	commands->CopyResource(triangles.Get(), triangleStaging.Get());
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition = {vertices.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 		D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = indices.Get();
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = meshlets.Get();
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = references.Get();
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = triangles.Get();
 	commands->ResourceBarrier(1, &barrier);
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{};
 	build.Inputs = blasInputs;
@@ -161,6 +204,10 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	renderer.commandQueue()->ExecuteCommandLists(1, lists);
 	renderer.waitForGpu();
 	mVertices = std::move(vertices);
+	mIndices = std::move(indices);
+	mMeshlets = std::move(meshlets);
+	mMeshletVertices = std::move(references);
+	mMeshletTriangles = std::move(triangles);
 	mBlas = std::move(blas);
 	mTlas = std::move(tlas);
 }
@@ -170,7 +217,7 @@ void MeshRaytracer::createPipeline()
 	D3D12_DESCRIPTOR_RANGE outputRange{};
 	outputRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	outputRange.NumDescriptors = 1;
-	D3D12_ROOT_PARAMETER parameters[4]{};
+	D3D12_ROOT_PARAMETER parameters[7]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -181,6 +228,12 @@ void MeshRaytracer::createPipeline()
 	parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	parameters[3].Constants.Num32BitValues = sizeof(SceneConstants) / sizeof(UINT);
 	parameters[3].Constants.ShaderRegister = 0;
+	parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[4].Descriptor.ShaderRegister = 2;
+	parameters[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[5].Descriptor.ShaderRegister = 3;
+	parameters[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[6].Descriptor.ShaderRegister = 4;
 	D3D12_ROOT_SIGNATURE_DESC rootDescription{};
 	rootDescription.NumParameters = static_cast<UINT>(std::size(parameters));
 	rootDescription.pParameters = parameters;
@@ -274,7 +327,7 @@ void MeshRaytracer::resizeOutput(UINT width, UINT height)
 	mHeight = height;
 }
 
-void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, bool headlight, float exposure,
+void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, bool headlight, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
 	if (mWidth != renderer.width() || mHeight != renderer.height())
@@ -294,6 +347,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const auto forward = camera.forward();
 	constants.mLightDirection = headlight ? std::array<float, 3>{-forward.x, -forward.y, -forward.z} : std::array<float, 3>{0.3f, 0.8f, 0.4f};
 	constants.mExposure = exposure;
+	constants.mMeshletColors = meshletColors ? 1.0f : 0.0f;
 	ComPtr<ID3D12GraphicsCommandList4> commands;
 	check(commandList->QueryInterface(IID_PPV_ARGS(&commands)), "Query DXR command list");
 	ID3D12DescriptorHeap* heaps[] = {mSrvUavHeap.Get()};
@@ -302,6 +356,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootDescriptorTable(0, mSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
 	commands->SetComputeRootShaderResourceView(1, mTlas->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(2, mVertices->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(4, mMeshletVertices->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(5, mMeshlets->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
 	commands->SetComputeRoot32BitConstants(3, sizeof(constants) / sizeof(UINT), &constants, 0);
 	commands->SetPipelineState1(mPipeline.Get());
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;

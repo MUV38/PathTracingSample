@@ -5,6 +5,17 @@ OpenUSDのヘッダー、DLL、Pythonは表示アプリに不要です。ルー�
 既存のWASDフリーカメラ、Alt回転・パン・ドリー、ホイールによる速度変更、撮影機能を利用できます。
 F / Frame modelはシーン全体にカメラを合わせます。HeadlightとExposureで表示を調整できます。
 
+meshoptimizer v1.3の `meshopt_buildMeshletsSpatial` で作成したmeshletを読み込みます。
+各meshletは最大64頂点・64三角形で、共有頂点の参照と8bitローカル三角形インデックスを持ちます。
+1個のBLAS内にmeshletごとのindexed geometryを作り、Closest Hitでmeshletの頂点参照とローカルインデックスをGPU上でたどります。
+通常DXR用の32bitインデックスはロード時に生成します。バイナリ内のローカル構造をそのままGPUにも保持し、将来のCLAS実装の入力として利用できます。
+GeometryIndex()を使用するため、DXR Tier 1.1 / Shader Model 6.5が必要です。CLAS APIとMesh Shaderの実行はまだありません。
+
+`Meshlet colors` にチェックするとmeshletごとに色分けします。頂点数とmeshlet数はパネルに表示します。
+自動確認には `--meshlet-colors --screenshot <出力.png>` も使用できます。
+同梱Preview Roomは192三角形、480共有頂点、9 meshletsです。
+旧v1（三角形リスト）のバイナリは読み込みません。USDから新しい変換ツールで再変換してください。
+
 初期表示はリポジトリ用に作成した **Preview Room** です。Kitchen Setとは異なる簡易モデルです。
 ソースは `assets/Source/PreviewRoom/`、変換済みデータは `assets/PreviewRoom.ptscene` です。
 

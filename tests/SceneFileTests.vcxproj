@@ -6,10 +6,17 @@
 		<Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
 	</PropertyGroup>
 	<Import Project="..\build_support\Cpp.props" />
-	<ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+	<ItemDefinitionGroup>
+		<Link><SubSystem>Console</SubSystem></Link>
+		<ClCompile><AdditionalIncludeDirectories>$(RepositoryRoot)tools\UsdConverter;$(RepositoryRoot)third_party\meshoptimizer\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+	</ItemDefinitionGroup>
 	<ItemGroup>
 		<ClCompile Include="SceneFileTests.cpp" />
 		<ClCompile Include="..\common\SceneFile.cpp" />
+		<ClCompile Include="..\tools\UsdConverter\MeshletBuilder.cpp" />
+		<ClCompile Include="..\third_party\meshoptimizer\src\allocator.cpp" />
+		<ClCompile Include="..\third_party\meshoptimizer\src\indexgenerator.cpp" />
+		<ClCompile Include="..\third_party\meshoptimizer\src\clusterizer.cpp" />
 		<ClInclude Include="..\common\SceneFile.h" />
 	</ItemGroup>
 	<Import Project="..\build_support\Cpp.targets" />

@@ -9,7 +9,7 @@ Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
 | --- | --- | --- |
 | PathTracingSample | 画面クリア、ImGui、スクリーンショット | DirectX 12。ハードウェアが利用できなければWARP |
 | DxrCube | 12枚の三角形のキューブをDXRで描画 | DXR Tier 1.0以上に対応するGPUとドライバ |
-| UsdKitchen | 外部で変換したUSDのバイナリをDXRで描画。アプリから変換ツールを起動可能 | DXR Tier 1.0以上 |
+| UsdKitchen | meshoptimizerで変換したmeshletバイナリをDXRで描画。アプリから変換ツールを起動可能 | DXR Tier 1.1以上 |
 | SampleFramework | 上記で共有する静的ライブラリ | 単独では起動しません |
 | CameraTests | カメラの移動・注視点操作・速度変更のテスト | GPU不要のコンソールテスト |
 | SceneFileTests | バイナリの往復・破損検出、USD変換結果のテスト | GPU / USD SDK不要 |
@@ -57,6 +57,8 @@ Agility SDKは将来のCLAS利用を見据えた指定版を維持していま�
 
 `UsdKitchen` は `.ptscene` 独自バイナリだけを読み込み、OpenUSDにはリンクしません。
 初期表示は同梱の自作 **Preview Room**（192三角形）です。Pixar Kitchen Setは含みません。
+変換ツールはmeshoptimizer **v1.3** で最大64頂点・64三角形のmeshletへ分割します。
+表示アプリはmeshlet専用のv2バイナリを読みます。旧v1は未対応のためUSDから再変換してください。
 USDを変換する別ソリューションは `tools/UsdConverter/UsdConverter.slnx` です。
 既存OpenUSD SDKの指定、変換と表示、Kitchen Setの入手後の手順は
 [USDサンプルの説明](samples/UsdKitchen/README.md) と [変換ツールの説明](tools/UsdConverter/README.md) を参照してください。
