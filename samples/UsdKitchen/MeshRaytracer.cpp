@@ -94,8 +94,11 @@ struct SceneConstants
 	float mRectangleHeight = 1;
 	std::array<float, 3> mRectangleRadiance{};
 	uint32_t mRectangleMis = 1;
+	uint32_t mMeshLightCount = 0;
+	uint32_t mEmissiveMis = 1;
+	std::array<float,2> mPadding3{};
 };
-static_assert(sizeof(SceneConstants) == 60 * sizeof(float));
+static_assert(sizeof(SceneConstants) == 64 * sizeof(float));
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -130,7 +133,14 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	auto materialStaging = uploadBuffer(mDevice.Get(), scene.mMaterials.data(), scene.mMaterials.size() * sizeof(SceneMaterial));
 	auto materials = createBuffer(mDevice.Get(), scene.mMaterials.size() * sizeof(SceneMaterial), D3D12_HEAP_TYPE_DEFAULT,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	auto materialData = scene.mMaterials;
 	const auto triangleIndices = meshletTriangleIndices(scene);
+	auto meshLightData = createMeshLights(scene.mVertices, triangleIndices);
+	const auto activeLights = updateMeshLightDistribution(meshLightData, materialData);
+	const size_t lightBytes = meshLightData.size() * sizeof(MeshLight);
+	auto lightStaging = uploadBuffer(mDevice.Get(), meshLightData.data(), lightBytes);
+	auto meshLights = createBuffer(mDevice.Get(), lightBytes, D3D12_HEAP_TYPE_DEFAULT,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
 	auto indexStaging = uploadBuffer(mDevice.Get(), triangleIndices.data(), triangleIndices.size() * sizeof(uint32_t));
 	auto indices = createBuffer(mDevice.Get(), triangleIndices.size() * sizeof(uint32_t), D3D12_HEAP_TYPE_DEFAULT,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -202,6 +212,7 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	commands->CopyResource(meshlets.Get(), meshletStaging.Get());
 	commands->CopyResource(references.Get(), referenceStaging.Get());
 	commands->CopyResource(triangles.Get(), triangleStaging.Get());
+	commands->CopyResource(meshLights.Get(), lightStaging.Get());
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition = {vertices.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
@@ -216,6 +227,8 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	barrier.Transition.pResource = references.Get();
 	commands->ResourceBarrier(1, &barrier);
 	barrier.Transition.pResource = triangles.Get();
+	commands->ResourceBarrier(1, &barrier);
+	barrier.Transition.pResource = meshLights.Get();
 	commands->ResourceBarrier(1, &barrier);
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{};
 	build.Inputs = blasInputs;
@@ -237,6 +250,10 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	mVertices = std::move(vertices);
 	mMaterials = std::move(materials);
 	mMaterialCount = scene.mMaterials.size();
+	mMaterialData = std::move(materialData);
+	mMeshLightData = std::move(meshLightData);
+	mMeshLights = std::move(meshLights);
+	mEmissiveTriangleCount = activeLights;
 	mIndices = std::move(indices);
 	mMeshlets = std::move(meshlets);
 	mMeshletVertices = std::move(references);
@@ -253,6 +270,25 @@ void MeshRaytracer::updateMaterials(Renderer& renderer, const std::vector<SceneM
 	{
 		throw std::runtime_error("Updating materials must preserve the scene material count.");
 	}
+	auto materialData = materials;
+	bool emissionChanged = false;
+	for (size_t index = 0; index < materials.size(); ++index)
+	{
+		emissionChanged |= materials[index].mEmissiveColor != mMaterialData[index].mEmissiveColor
+			|| materials[index].mEmissiveStrength != mMaterialData[index].mEmissiveStrength;
+	}
+	std::vector<MeshLight> meshLightData;
+	ComPtr<ID3D12Resource> lightStaging, meshLights;
+	uint32_t activeLights = mEmissiveTriangleCount;
+	if (emissionChanged)
+	{
+		meshLightData = mMeshLightData;
+		activeLights = updateMeshLightDistribution(meshLightData, materials);
+		const size_t lightBytes = meshLightData.size() * sizeof(MeshLight);
+		lightStaging = uploadBuffer(mDevice.Get(), meshLightData.data(), lightBytes);
+		meshLights = createBuffer(mDevice.Get(), lightBytes, D3D12_HEAP_TYPE_DEFAULT,
+			D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	}
 	const size_t bytes = materials.size() * sizeof(SceneMaterial);
 	auto staging = uploadBuffer(mDevice.Get(), materials.data(), bytes);
 	auto replacement = createBuffer(mDevice.Get(), bytes, D3D12_HEAP_TYPE_DEFAULT,
@@ -267,11 +303,24 @@ void MeshRaytracer::updateMaterials(Renderer& renderer, const std::vector<SceneM
 	barrier.Transition = {replacement.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 		D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
 	commands->ResourceBarrier(1, &barrier);
+	if (emissionChanged)
+	{
+		commands->CopyResource(meshLights.Get(), lightStaging.Get());
+		barrier.Transition.pResource = meshLights.Get();
+		commands->ResourceBarrier(1, &barrier);
+	}
 	check(commands->Close(), "Close material upload");
 	ID3D12CommandList* lists[] = {commands.Get()};
 	renderer.commandQueue()->ExecuteCommandLists(1, lists);
 	renderer.waitForGpu();
 	mMaterials = std::move(replacement);
+	mMaterialData = std::move(materialData);
+	if (emissionChanged)
+	{
+		mMeshLightData = std::move(meshLightData);
+		mMeshLights = std::move(meshLights);
+		mEmissiveTriangleCount = activeLights;
+	}
 	resetAccumulation();
 }
 
@@ -350,7 +399,7 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[10]{};
+	D3D12_ROOT_PARAMETER parameters[11]{};
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -373,6 +422,8 @@ void MeshRaytracer::createPipeline()
 	parameters[8].Descriptor.ShaderRegister = 6;
 	parameters[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	parameters[9].Descriptor.ShaderRegister = 7;
+	parameters[10].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	parameters[10].Descriptor.ShaderRegister = 8;
 	D3D12_STATIC_SAMPLER_DESC sampler{};
 	sampler.Filter = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -415,7 +466,7 @@ void MeshRaytracer::createPipeline()
 	hitGroup.HitGroupExport = L"CubeHitGroup";
 	hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
 	hitGroup.ClosestHitShaderImport = L"CHSMain";
-	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{14 * sizeof(float), 2 * sizeof(float)};
+	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{15 * sizeof(float), 2 * sizeof(float)};
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{1};
 	ID3D12RootSignature* globalRoot = mRootSignature.Get();
 	const D3D12_STATE_SUBOBJECT subobjects[] = {
@@ -526,6 +577,8 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mEnvironmentIntensity = tracing.mEnvironmentIntensity;
 	constants.mEnvironmentRotation = DirectX::XMConvertToRadians(tracing.mEnvironmentRotation);
 	constants.mEnvironmentMis = tracing.mEnvironmentMis ? 1u : 0u;
+	constants.mMeshLightCount = mEmissiveTriangleCount > 0 ? static_cast<uint32_t>(mMeshLightData.size()) : 0;
+	constants.mEmissiveMis = tracing.mEmissiveMis && !meshletColors ? 1u : 0u;
 	const auto& rectangle = lighting.mRectangle;
 	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
 		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
@@ -582,6 +635,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
 	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
+	commands->SetComputeRootShaderResourceView(10, mMeshLights->GetGPUVirtualAddress());
 	// SampleFramework has waited for the previous frame before this upload is reused.
 	void* mappedConstants = nullptr;
 	const D3D12_RANGE noRead{0, 0};

@@ -5,6 +5,7 @@
 #include "Lighting.h"
 #include "EnvironmentMap.h"
 #include "PathTracing.h"
+#include "MeshLight.h"
 
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -17,6 +18,7 @@ public:
 	void initialize(Renderer& renderer);
 	void load(Renderer& renderer, const SceneData& scene);
 	void loadEnvironment(Renderer& renderer, const EnvironmentMap& environment);
+	uint32_t emissiveTriangleCount() const { return mEmissiveTriangleCount; }
 	void updateMaterials(Renderer& renderer, const std::vector<SceneMaterial>& materials);
 	void resetAccumulation() { mResetAccumulation = true; }
 	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
@@ -32,6 +34,10 @@ private:
 	ComPtr<ID3D12Resource> mVertices;
 	ComPtr<ID3D12Resource> mMaterials;
 	size_t mMaterialCount = 0;
+	std::vector<SceneMaterial> mMaterialData;
+	std::vector<MeshLight> mMeshLightData;
+	uint32_t mEmissiveTriangleCount = 0;
+	ComPtr<ID3D12Resource> mMeshLights;
 	ComPtr<ID3D12Resource> mIndices;
 	ComPtr<ID3D12Resource> mMeshlets;
 	ComPtr<ID3D12Resource> mMeshletVertices;

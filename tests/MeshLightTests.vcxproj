@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals"><ProjectGuid>{DF839BF4-0E2A-4940-9D41-D7708DA24269}</ProjectGuid></PropertyGroup>
+	<Import Project="..\build_support\Cpp.props" />
+	<ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+	<ItemGroup>
+		<ClCompile Include="MeshLightTests.cpp" />
+		<ClCompile Include="..\common\SceneFile.cpp" />
+		<ClCompile Include="..\samples\UsdKitchen\MeshLight.cpp" />
+		<ClInclude Include="..\samples\UsdKitchen\MeshLight.h" />
+	</ItemGroup>
+	<Import Project="..\build_support\Cpp.targets" />
+</Project>

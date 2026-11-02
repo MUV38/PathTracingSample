@@ -136,6 +136,14 @@ GGXで面の下に出たサンプルは捨て、再抽選しません。多重�
 ```
 
 `--metallic`、`--roughness`、`--specular` は0～1で、ロード時に全マテリアルへ適用する比較用の上書きです。
+Emissive Color（各0～1）×Strength（0～100000）は両面に発光します。
+発光三角形の選択確率を面積×線形輝度から構築し、各反射で1点をNEE評価します。選択確率を含む立体角PDFで、発光面へ到達したBRDFレイとMISを行います。
+一次レイと完全鏡のdelta反射にはMISの減衰を掛けません。発光面の通常のBRDF反射は維持し、発光成分だけをMISで重み付けします。
+光源への遮蔽を常に検査し、解析的な矩形ライトも遮蔽物に含めます。反射上限でのNEEは打ち切り、そこまでに到達した発光面は表示します。
+マテリアル編集で発光色・強度が変わると選択分布とGPUの光源表を更新し、蓄積をリセットします。非発光面を新しく光らせることや、全消灯にも対応します。
+Metallic / Roughnessなどの変更だけでは光源表を再構築しません。ゼロ面積の三角形は光源サンプリングから除外します。
+光源表は表示時にmeshletから派生生成するため、USD SDKや独自バイナリの形式変更は不要です。
+自作の複数光源モデルと画像・数値検証は [発光メッシュのテスト](../../tests/EmissiveLights.md) を参照してください。
 参考: [Filamentの標準PBRモデル](https://google.github.io/filament/Filament.md.html)、[UsdPreviewSurface仕様](https://openusd.org/dev/spec_usdpreviewsurface.html)
 
 ## 間接照明とIBL
@@ -150,6 +158,7 @@ GGXで面の下に出たサンプルは捨て、再抽選しません。多重�
 - Samples per frame: 1フレームあたりのサンプル数（1～16、既定1）。カメラレイの位置もジッターします。
 - IBL intensity / rotation: 環境マップの強度（0～100、既定1）と水平方向の回転。
 - IBL NEE / MIS: 既定で有効。IBLの重点サンプリングと遮蔽レイによる直接評価を、BRDFサンプリングとMISで統合します。切り替えると蓄積をリセットします。
+- Emissive NEE / MIS: 既定で有効。発光メッシュのNEE/MISを切り替えます。Emissive trianglesは有効な発光三角形数です。
 - Open IBL (.hdr): 緯度経度形式のRadiance HDRを選択します。Preview skyで自作の空マップに戻せます。
 - Reset accumulation: 蓄積をやり直します。カメラ、光源、IBL、露出、バウンス数、サンプル数、描画領域、モデルが変わった場合も自動でリセットします。
 
@@ -166,7 +175,7 @@ IBLロード時に線形輝度と画素の立体角から行・列のCDFを作�
 各反射でIBLを1サンプル評価し、既存のBRDFサンプルとpower heuristic（指数2）で重み付けします。
 反射レイがIBLへMissした場合だけMISの重みを掛け、背景・完全鏡のdelta反射・物体の発光にはその重みを掛けません。
 NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBLの遮蔽は常に検査し、Direct lightingのShadows切り替えとは独立です。
-固定のバウンス上限によるパストレーシングです。発光面の直接サンプリング、デノイズ、Russian roulette、透過反射は未実装です。
+固定のバウンス上限によるパストレーシングです。デノイズ、Russian roulette、透過反射は未実装です。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 
 ```powershell
@@ -181,6 +190,7 @@ NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBL
 HDR読み込みのCPUテストはDebug / Releaseの `EnvironmentMapTests.exe build/checks` で実行できます。
 同じテストでCDFの正規化・立体角PDF・黒マップ・高輝度画素の選択確率も検査します。
 `--no-ibl-mis` は従来のBRDFサンプリングだけに戻す比較用オプションです。NEE / MISのエネルギー検証は [WhiteFurnace](../../tests/WhiteFurnace.md) に含みます。
+`--no-emissive-mis` は発光メッシュのNEE/MISを無効にしてBRDFサンプリングだけで比較します。IBL・矩形ライトのMISとは独立です。
 
 参考: [PBRT: Infinite Area Lights](https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights)
 、[PBRT: A Better Path Tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer)
