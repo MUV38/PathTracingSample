@@ -96,7 +96,7 @@ void prepareRestir(uint2 pixel, uint state)
 		LightReservoir reservoir = (LightReservoir)0;
 		if (float(pixel.x) >= viewportLeft)
 		{
-			float2 jitter = float2(random(state), random(state));
+			float2 jitter = rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state));
 			RayDesc ray = primaryRay(pixel, jitter);
 			Payload payload;
 			payload.hit = 0;

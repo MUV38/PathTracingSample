@@ -36,6 +36,17 @@ Renderer::~Renderer()
 	// Destructors must still release the event if the device has been removed.
 	try { waitForGpu(); }
 	catch (...) { OutputDebugStringW(L"GPU wait failed during shutdown.\n"); }
+	if (mSample && mSample->mShutdown)
+	{
+		try
+		{
+			mSample->mShutdown();
+		}
+		catch (...)
+		{
+			OutputDebugStringW(L"Sample shutdown failed.\n");
+		}
+	}
 	if (mGuiDx12Initialized)
 	{
 		ImGui_ImplDX12_Shutdown();
@@ -71,7 +82,9 @@ void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sa
 		OutputDebugStringW(L"D3D12 debug layer unavailable; continuing without validation.\n");
 	}
 #endif
-	check(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&mFactory)), "CreateDXGIFactory2");
+	const auto createFactory = sample.mCreateFactory ? sample.mCreateFactory : CreateDXGIFactory2;
+	const auto createDevice = sample.mCreateDevice ? sample.mCreateDevice : D3D12CreateDevice;
+	check(createFactory(factoryFlags, IID_PPV_ARGS(&mFactory)), "CreateDXGIFactory2");
 
 	// Prefer a hardware adapter; software rendering remains useful for the clear-only milestone.
 	ComPtr<IDXGIAdapter1> adapter;
@@ -87,7 +100,7 @@ void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sa
 		DXGI_ADAPTER_DESC1 description{};
 		check(adapter->GetDesc1(&description), "GetDesc1");
 		if (!(description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
-			SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice))))
+			SUCCEEDED(createDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice))))
 		{
 			D3D12_FEATURE_DATA_D3D12_OPTIONS5 adapterOptions{};
 			if (sample.mRequireDxr && (FAILED(mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
@@ -108,7 +121,7 @@ void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sa
 			throw std::runtime_error("This sample requires a DXR-capable GPU and driver (Raytracing Tier 1.0 or later).");
 		}
 		check(mFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)), "EnumWarpAdapter");
-		check(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice)), "D3D12CreateDevice (WARP)");
+		check(createDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&mDevice)), "D3D12CreateDevice (WARP)");
 		mAdapterName = L"WARP (software)";
 	}
 

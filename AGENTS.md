@@ -29,6 +29,7 @@ GGXのD・Smith visibility・粗さの定義を変更した場合は `tools/GgxE
 発光メッシュの選択分布・PDF・NEE/MISを変更した場合はDebug / Releaseの `MeshLightTests.exe <出力先>`、`tests/RunEmissiveLights.ps1 -Configuration <構成>`、WhiteFurnaceTestsを実行し、複数色の照明・影・鏡の保存画像も確認すること。手順は `tests/EmissiveLights.md` を参照すること
 
 # サンプル構成
+DLSS Ray Reconstructionの入力・ジッター・履歴・SDK評価を変更した場合はDebug / Releaseの `tests/RunRayReconstruction.ps1 -Configuration <構成>` を実行し、SDKログと保存PNGを確認すること。手順・ライセンス同意後のDLL配置・検証の制限は `tests/RayReconstruction.md` を参照すること。SDK復元は明示操作とし、ビルド時の自動ダウンロードや、SDK・DLSS DLLのコミットを行わないこと
 ウィンドウ、DirectX 12初期化、ImGui、撮影機能は `common/` のSampleFrameworkで共有する
 サンプル固有の描画とシェーダーは `samples/<サンプル名>/` に置き、共通Rendererへサンプル別の分岐を追加しないこと
 共通のVisual Studio設定は `build_support/Cpp.props` と `Cpp.targets` に集約する

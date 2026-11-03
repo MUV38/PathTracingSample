@@ -2,6 +2,7 @@
 
 Visual Studio 2026で開く、Win32 / DirectX 12 / DXRのサンプル集です。
 Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
+UsdKitchenのビルド前に `.\tools\RestoreStreamline.ps1` でStreamline **2.14.16** を復元してください。対応RTX GPUではDLSS Ray Reconstructionを利用できます。DLLのライセンス確認と配置、`--rr` による実行は [RRの導入手順](tests/RayReconstruction.md) を参照してください。
 
 ## サンプル
 

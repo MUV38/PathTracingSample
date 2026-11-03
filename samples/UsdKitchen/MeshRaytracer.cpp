@@ -113,20 +113,25 @@ struct SceneConstants
 	uint32_t mRussianRoulette = 1;
 	uint32_t mRestirMode = 0;
 	uint32_t mRestirDebug = 0;
-	std::array<float,2> mRestirPadding{};
+	uint32_t mRREnabled = 0;
+	uint32_t mRRDebug = 0;
 	uint32_t mHistoryValid = 0;
 	uint32_t mRestirFrame = 0;
 	std::array<float,2> mHistoryPadding{};
 	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
 	float mPreviousViewportLeft = 0;
 	std::array<float,3> mPreviousCameraPadding{};
+	DirectX::XMFLOAT2 mRRJitter{};
+	uint32_t mRRReset = 0;
+	uint32_t mRRFrame = 0;
 };
-static_assert(sizeof(SceneConstants) == 2880);
+static_assert(sizeof(SceneConstants) == 2896);
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
 {
 	check(renderer.device()->QueryInterface(IID_PPV_ARGS(&mDevice)), "Query DXR device");
+	mRayReconstruction.setDevice(renderer.device());
 	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options{};
 	check(mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options, sizeof(options)), "Query DXR tier");
 	if (options.RaytracingTier < D3D12_RAYTRACING_TIER_1_1)
@@ -147,7 +152,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	heap.NumDescriptors = 3;
+	heap.NumDescriptors = 11;
 	heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	check(mDevice->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&mSrvUavHeap)), "Create scene UAV heap");
 	resizeOutput(renderer.width(), renderer.height());
@@ -430,7 +435,14 @@ void MeshRaytracer::createPipeline()
 	environmentRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	environmentRange.NumDescriptors = 1;
 	environmentRange.BaseShaderRegister = 5;
-	D3D12_ROOT_PARAMETER parameters[18]{};
+	D3D12_DESCRIPTOR_RANGE rrRange{};
+	rrRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	rrRange.BaseShaderRegister = 7;
+	rrRange.NumDescriptors = 8;
+	D3D12_ROOT_PARAMETER parameters[19]{};
+	parameters[18].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	parameters[18].DescriptorTable.NumDescriptorRanges = 1;
+	parameters[18].DescriptorTable.pDescriptorRanges = &rrRange;
 	parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[0].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[0].DescriptorTable.pDescriptorRanges = &outputRange;
@@ -654,6 +666,26 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
+	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && !meshletColors;
+	if (useRR)
+	{
+		viewportLeft = std::ceil(viewportLeft);
+		constants.mViewportLeft = viewportLeft;
+		constants.mAspect = float(mWidth - static_cast<UINT>(viewportLeft)) / float(mHeight);
+	}
+	constants.mRREnabled = useRR ? 1u : 0u;
+	constants.mRRDebug = mRRView;
+	mRayReconstruction.resize(mDevice.Get(), useRR ? mWidth - static_cast<UINT>(viewportLeft) : 1, useRR ? mHeight : 1);
+	auto rrHandle = mSrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+	rrHandle.ptr += 3 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	for (size_t i = 0; i < 8; ++i)
+	{
+		D3D12_UNORDERED_ACCESS_VIEW_DESC rrView{};
+		rrView.Format = RayReconstruction::format(i);
+		rrView.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		mDevice->CreateUnorderedAccessView(mRayReconstruction.resource(i), nullptr, &rrView, rrHandle);
+		rrHandle.ptr += mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
 	const bool needsPrimaryData = constants.mRestirMode > 0 || constants.mRestirDebug > 0;
 	resizeRestir(needsPrimaryData ? static_cast<size_t>(mWidth) * mHeight : 1);
 	if (lighting.mRectangleCount > Lighting::maximumRectangles)
@@ -726,6 +758,24 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRestirFrame = mRestirFrame++;
 	constants.mPreviousViewProjection = mPreviousViewProjection;
 	constants.mPreviousViewportLeft = mPreviousViewportLeft;
+	const bool resetRR = !mRRHistoryValid || mResetAccumulation || settingsChanged || viewportLeft != mPreviousViewportLeft;
+	constants.mRRReset = resetRR ? 1u : 0u;
+	constants.mRRFrame = constants.mRestirFrame;
+	if (useRR)
+	{
+		auto halton = [](uint32_t index, uint32_t base)
+		{
+			float value = 0, step = 1;
+			while (index > 0)
+			{
+				step /= static_cast<float>(base);
+				value += step * static_cast<float>(index % base);
+				index /= base;
+			}
+			return value - 0.5f;
+		};
+		constants.mRRJitter = {halton(constants.mRestirFrame + 1, 2), halton(constants.mRestirFrame + 1, 3)};
+	}
 	if (mResetAccumulation || !hadPrevious
 		|| std::memcmp(mPreviousConstants.data(), &constants, integratorSize) != 0 || mAccumulatedFrames == UINT32_MAX)
 	{
@@ -738,34 +788,41 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	mLastSamplesPerFrame = tracing.mSamplesPerFrame;
 	ComPtr<ID3D12GraphicsCommandList4> commands;
 	check(commandList->QueryInterface(IID_PPV_ARGS(&commands)), "Query DXR command list");
-	ID3D12DescriptorHeap* heaps[] = {mSrvUavHeap.Get()};
-	commands->SetDescriptorHeaps(1, heaps);
-	commands->SetComputeRootSignature(mRootSignature.Get());
-	commands->SetComputeRootDescriptorTable(0, mSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
-	auto environmentHandle = mSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
-	environmentHandle.ptr += 2 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	commands->SetComputeRootDescriptorTable(7, environmentHandle);
-	commands->SetComputeRootShaderResourceView(1, mTlas->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(2, mVertices->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(4, mMeshletVertices->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(5, mMeshlets->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(10, mMeshLights->GetGPUVirtualAddress());
-	commands->SetComputeRootShaderResourceView(11, mGgxEnergy->GetGPUVirtualAddress());
-	for (UINT i = 0; i < 5; ++i)
+	auto bindScene = [&]()
 	{
-		commands->SetComputeRootUnorderedAccessView(13 + i, mRestirBuffers[i]->GetGPUVirtualAddress());
-	}
+		ID3D12DescriptorHeap* heaps[] = {mSrvUavHeap.Get()};
+		commands->SetDescriptorHeaps(1, heaps);
+		commands->SetComputeRootSignature(mRootSignature.Get());
+		commands->SetComputeRootDescriptorTable(0, mSrvUavHeap->GetGPUDescriptorHandleForHeapStart());
+		auto environmentHandle = mSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+		environmentHandle.ptr += 2 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		commands->SetComputeRootDescriptorTable(7, environmentHandle);
+		commands->SetComputeRootShaderResourceView(1, mTlas->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(2, mVertices->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(4, mMeshletVertices->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(5, mMeshlets->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(6, mMeshletTriangles->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(8, mMaterials->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(9, mEnvironmentDistribution->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(10, mMeshLights->GetGPUVirtualAddress());
+		commands->SetComputeRootShaderResourceView(11, mGgxEnergy->GetGPUVirtualAddress());
+		for (UINT i = 0; i < 5; ++i)
+		{
+			commands->SetComputeRootUnorderedAccessView(13 + i, mRestirBuffers[i]->GetGPUVirtualAddress());
+		}
+		auto rrGpuHandle = mSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
+		rrGpuHandle.ptr += 3 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		commands->SetComputeRootDescriptorTable(18, rrGpuHandle);
+		commands->SetComputeRootConstantBufferView(3, mConstants->GetGPUVirtualAddress());
+		commands->SetPipelineState1(mPipeline.Get());
+	};
 	// SampleFramework has waited for the previous frame before this upload is reused.
 	void* mappedConstants = nullptr;
 	const D3D12_RANGE noRead{0, 0};
 	check(mConstants->Map(0, &noRead, &mappedConstants), "Map scene constants");
 	std::memcpy(mappedConstants, &constants, sizeof(constants));
 	mConstants->Unmap(0, nullptr);
-	commands->SetComputeRootConstantBufferView(3, mConstants->GetGPUVirtualAddress());
-	commands->SetPipelineState1(mPipeline.Get());
+	bindScene();
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
 	const D3D12_GPU_VIRTUAL_ADDRESS table = mShaderTable->GetGPUVirtualAddress();
 	D3D12_DISPATCH_RAYS_DESC dispatch{};
@@ -794,6 +851,15 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	commands->DispatchRays(&dispatch);
+	if (useRR)
+	{
+		mRayReconstruction.evaluate(commands.Get(), camera, static_cast<UINT>(viewportLeft), constants.mRRJitter,
+			mPreviousViewProjection, resetRR, constants.mRRFrame);
+		bindScene();
+		commands->SetComputeRoot32BitConstant(12, 3, 0);
+		commands->DispatchRays(&dispatch);
+	}
+	mRRHistoryValid = useRR;
 	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
 	commands->ResolveQueryData(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, mTimestampReadback.Get(), 0);
 	mHasTimestamp = true;

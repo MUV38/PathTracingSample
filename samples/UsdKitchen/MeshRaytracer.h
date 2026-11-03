@@ -6,6 +6,7 @@
 #include "EnvironmentMap.h"
 #include "PathTracing.h"
 #include "MeshLight.h"
+#include "RayReconstruction.h"
 
 #include <d3d12.h>
 #include <array>
@@ -24,6 +25,11 @@ public:
 	void resetAccumulation() { mResetAccumulation = true; }
 	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
 	double gpuMilliseconds() const { return mGpuMilliseconds; }
+	RayReconstruction& rayReconstruction() { return mRayReconstruction; }
+	bool rayReconstructionEnabled() const { return mUseRayReconstruction; }
+	void setRayReconstructionEnabled(bool enabled) { mUseRayReconstruction = enabled; }
+	uint32_t rayReconstructionView() const { return mRRView; }
+	void setRayReconstructionView(uint32_t view) { mRRView = view; }
 	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 		ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer);
 
@@ -33,6 +39,8 @@ private:
 	void createShaderTable();
 	void resizeOutput(UINT width, UINT height);
 	void resizeRestir(size_t pixels);
+	// Keep the Streamline module alive until every graphics object is released.
+	RayReconstruction mRayReconstruction;
 	ComPtr<ID3D12Device5> mDevice;
 	ComPtr<ID3D12Resource> mVertices;
 	ComPtr<ID3D12Resource> mMaterials;
@@ -74,4 +82,7 @@ private:
 	uint64_t mTimestampFrequency = 0;
 	bool mHasTimestamp = false;
 	double mGpuMilliseconds = -1;
+	bool mUseRayReconstruction = false;
+	bool mRRHistoryValid = false;
+	uint32_t mRRView = 0;
 };

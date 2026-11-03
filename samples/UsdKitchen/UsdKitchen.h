@@ -20,6 +20,7 @@ public:
 	void update(Renderer& renderer, float deltaTime);
 	void drawGui();
 	void render(Renderer& renderer, ID3D12GraphicsCommandList* commands, ID3D12Resource* backBuffer);
+	RayReconstruction& rayReconstruction() { return mRaytracer.rayReconstruction(); }
 	bool readyForScreenshot() const
 	{
 		return mHasScene && !mConversionProcess && mRaytracer.accumulatedSamples() >= mScreenshotSamples

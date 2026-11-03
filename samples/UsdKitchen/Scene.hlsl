@@ -29,6 +29,14 @@ RWStructuredBuffer<PrimarySurface> previousSurfaces : register(u3);
 RWStructuredBuffer<LightReservoir> initialReservoirs : register(u4);
 RWStructuredBuffer<LightReservoir> currentReservoirs : register(u5);
 RWStructuredBuffer<LightReservoir> previousReservoirs : register(u6);
+RWTexture2D<float4> rrColor : register(u7);
+RWTexture2D<float> rrDepth : register(u8);
+RWTexture2D<float2> rrMotion : register(u9);
+RWTexture2D<float4> rrNormalRoughness : register(u10);
+RWTexture2D<float4> rrDiffuseAlbedo : register(u11);
+RWTexture2D<float4> rrSpecularAlbedo : register(u12);
+RWTexture2D<float> rrSpecularDistance : register(u13);
+RWTexture2D<float4> rrOutput : register(u14);
 cbuffer RestirPass : register(b1)
 {
 	uint restirPass;
@@ -71,13 +79,17 @@ cbuffer SceneConstants : register(b0)
 	uint russianRoulette;
 	uint restirMode;
 	uint restirDebug;
-	float2 restirPadding;
+	uint rrEnabled;
+	uint rrDebug;
 	uint historyValid;
 	uint restirFrame;
 	float2 historyPadding;
 	row_major float4x4 previousViewProjection;
 	float previousViewportLeft;
 	float3 previousCameraPadding;
+	float2 rrJitter;
+	uint rrReset;
+	uint rrFrame;
 };
 struct Payload
 {
@@ -310,12 +322,54 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
 }
 #include "RestirPasses.hlsli"
+#include "RayReconstruction.hlsli"
 [shader("raygeneration")]
 void RGSMain()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
 	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
-	state ^= (frameIndex + 1u) * 277803737u;
+	state ^= ((rrEnabled != 0 ? rrFrame : frameIndex) + 1u) * 277803737u;
+	if (restirPass == 3)
+	{
+		if (float(pixel.x) < viewportLeft)
+		{
+			outputImage[pixel] = float4(backgroundColor, 1);
+		}
+		else
+		{
+			uint2 guidePixel = uint2(pixel.x - uint(viewportLeft), pixel.y);
+			float3 color = displayColor(rrOutput[guidePixel].rgb);
+			if (rrDebug == 1)
+			{
+				color = displayColor(rrColor[guidePixel].rgb);
+			}
+			else if (rrDebug == 2)
+			{
+				color = rrNormalRoughness[guidePixel].xyz * 0.5f + 0.5f;
+			}
+			else if (rrDebug == 3)
+			{
+				color = rrNormalRoughness[guidePixel].www;
+			}
+			else if (rrDebug == 4 || rrDebug == 5)
+			{
+				float3 albedo = rrDebug == 4 ? rrDiffuseAlbedo[guidePixel].rgb : rrSpecularAlbedo[guidePixel].rgb;
+				albedo = saturate(albedo);
+				color = select(albedo <= 0.0031308f, albedo * 12.92f, 1.055f * pow(albedo, 1.0f / 2.4f) - 0.055f);
+			}
+			else if (rrDebug == 6)
+			{
+				color = float3(0.5f + rrMotion[guidePixel] * 0.05f, 0.5f);
+			}
+			else if (rrDebug == 7 || rrDebug == 8)
+			{
+				float distance = rrDebug == 7 ? rrDepth[guidePixel] : rrSpecularDistance[guidePixel];
+				color = (distance / (1 + distance)).xxx;
+			}
+			outputImage[pixel] = float4(color, 1);
+		}
+		return;
+	}
 	if (restirPass < 2)
 	{
 		prepareRestir(pixel, state);
@@ -330,7 +384,7 @@ void RGSMain()
 	for (uint sampleIndex = 0; sampleIndex < samplesPerFrame; ++sampleIndex)
 	{
 		float2 dimensions = float2(DispatchRaysDimensions().xy);
-		float2 jitter = float2(random(state), random(state));
+		float2 jitter = rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state));
 		float2 uv = float2((float(pixel.x) - viewportLeft + jitter.x) / max(dimensions.x - viewportLeft, 1.0f),
 			(float(pixel.y) + jitter.y) / dimensions.y);
 		float2 screen = uv * 2.0f - 1.0f;
@@ -353,6 +407,10 @@ void RGSMain()
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 			float rectangleDistance;
 			uint rectangleIndex = nearestRectangle(ray, rectangleDistance);
+			if (rrEnabled != 0 && sampleIndex == 0 && depth == 0)
+			{
+				writeRRGuides(pixel, ray, payload, rectangleIndex, rectangleDistance);
+			}
 			if (rectangleIndex < rectangleCount
 				&& (payload.hit == 0 || rectangleDistance < dot(payload.position - ray.Origin, ray.Direction)))
 			{
@@ -494,11 +552,15 @@ void RGSMain()
 	}
 	frameRadiance /= float(samplesPerFrame);
 	float3 average = frameRadiance;
-	if (frameIndex > 0)
+	if (frameIndex > 0 && rrEnabled == 0)
 	{
 		average = lerp(accumulation[pixel].rgb, frameRadiance, 1.0f / (float(frameIndex) + 1.0f));
 	}
 	accumulation[pixel] = float4(average, 1.0f);
+	if (rrEnabled != 0)
+	{
+		rrColor[uint2(pixel.x - uint(viewportLeft), pixel.y)] = float4(frameRadiance, 1);
+	}
 	outputImage[pixel] = float4(displayColor(average), 1.0f);
 	if (restirDebug > 0)
 	{

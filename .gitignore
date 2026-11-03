@@ -3,5 +3,6 @@
 /packages/
 *.vcxproj.user
 /build_support/Usd.local.props
+/build_support/Streamline.local.props
 /assets/local/
 /assets/Source/Kitchen_set/

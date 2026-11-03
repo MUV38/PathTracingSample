@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <d3d12.h>
 
 #include <filesystem>
 #include <functional>
@@ -20,6 +21,10 @@ struct Sample
 	std::function<void(const std::vector<std::wstring>&)> mConfigure;
 	std::function<bool()> mReadyForScreenshot;
 	std::function<void(Renderer&)> mInitialize;
+	// Optional graphics API entry points and shutdown for external rendering runtimes.
+	std::function<HRESULT(UINT, REFIID, void**)> mCreateFactory;
+	std::function<HRESULT(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**)> mCreateDevice;
+	std::function<void()> mShutdown;
 	// Runs after ImGui::NewFrame(), before building UI, so capture flags are current.
 	std::function<void(Renderer&, float)> mUpdate;
 	std::function<void()> mDrawGui;
