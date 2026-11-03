@@ -49,6 +49,14 @@ float random(inout uint state)
 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 	return float(((word >> 22u) ^ word) >> 8u) / 16777216.0f;
 }
+float3 testEnvironmentReservoirValue(Surface surface, float3 view, LightReservoir reservoir, float sampleRatio)
+{
+	if (reservoir.lightIndex == environmentLightIndex)
+	{
+		return evaluateEnvironmentReservoirSample(surface, view, decodeEnvironmentSample(reservoir.uv), 1.0f, reservoir.proposalPdf * sampleRatio);
+	}
+	return evaluateReservoirSample(surface, view, meshLights[reservoir.lightIndex], reservoir.uv);
+}
 [numthreads(64, 1, 1)]
 void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
@@ -93,6 +101,77 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	float maximum = 0;
 	for (uint index = 0; index < samplesPerThread; ++index)
 	{
+		if ((input.flags & 2048u) != 0)
+		{
+			uint mode = (input.flags >> 9u) & 3u;
+			bool mixed = (input.flags & 4096u) != 0;
+			float sampleRatio = (mode == 0 ? 1.0f : 8.0f) * (mixed ? 0.5f : 1.0f);
+			uint sources = mode >= 2 ? (mode == 3 ? 5u : 2u) : 1u;
+			LightReservoir combined = (LightReservoir)0;
+			for (uint sourceIndex = 0; sourceIndex < sources; ++sourceIndex)
+			{
+				Surface sourceSurface = surface;
+				if ((sourceIndex & 1u) != 0)
+				{
+					sourceSurface.normal = sourceSurface.geometricNormal = -surface.normal;
+				}
+				LightReservoir reservoir = (LightReservoir)0;
+				for (uint candidateIndex = 0; candidateIndex < (mode == 0 ? 1u : 8u); ++candidateIndex)
+				{
+					LightReservoir candidate = (LightReservoir)0;
+					float3 value;
+					if (!mixed || random(state) < 0.5f)
+					{
+						candidate.lightIndex = environmentLightIndex;
+						float2 lightU = float2(random(state), random(state));
+						float3 direction = sampleEnvironmentDirection(environmentDistribution, uint2(16,8), lightU, 0.7f, candidate.proposalPdf);
+						candidate.uv = encodeEnvironmentSample(direction);
+						value = evaluateEnvironmentReservoirSample(sourceSurface, view, decodeEnvironmentSample(candidate.uv), 1.0f, candidate.proposalPdf * sampleRatio);
+					}
+					else
+					{
+						candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+						candidate.uv = float2(random(state), random(state));
+						candidate.proposalPdf = meshLights[candidate.lightIndex].areaDensity;
+						value = evaluateReservoirSample(sourceSurface, view, meshLights[candidate.lightIndex], candidate.uv);
+					}
+					float pdf = candidate.proposalPdf * (mixed ? 0.5f : 1.0f);
+					float target = lightSampleTarget(value, pdf);
+					streamReservoir(reservoir, candidate, target, target / pdf, 1, random(state));
+				}
+				finishReservoir(reservoir);
+				float3 value = testEnvironmentReservoirValue(surface, view, reservoir, sampleRatio);
+				float target = lightSampleTarget(value, reservoir.proposalPdf * (mixed ? 0.5f : 1.0f));
+				float count = min(reservoir.count, sourceIndex == 0 ? 8.0f : 4.0f);
+				streamReservoir(combined, reservoir, target, target * reservoir.weight * count, count, random(state));
+			}
+			finishReservoir(combined);
+			float3 value = testEnvironmentReservoirValue(surface, view, combined, sampleRatio);
+			value *= combined.weight;
+			float3 direction, weight;
+			float3 u = float3(random(state), random(state), random(state));
+			if (sampleBsdf(surface, view, u, direction, weight))
+			{
+				bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
+				float pdf = environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f);
+				float bsdfPdf;
+				evaluateBsdf(surface, view, direction, bsdfPdf);
+				value += weight * environmentReservoirHitWeight(pdf * sampleRatio, bsdfPdf, delta);
+				float distance;
+				if (mixed && delta && intersectRectangle(rectangle, 0.0f, direction, 0.0001f, 100000, distance))
+				{
+					value += weight;
+				}
+			}
+			if (any(!isfinite(value)) || any(value < 0) || !isfinite(combined.weight))
+			{
+				++invalid;
+			}
+			sum += value;
+			sumSquared += value * value;
+			maximum = max(maximum, maxComponent(value));
+			continue;
+		}
 		if ((input.flags & 256u) != 0)
 		{
 			uint mode = (input.flags >> 9u) & 3u;

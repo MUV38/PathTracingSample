@@ -23,6 +23,7 @@ public:
 	void updateMaterials(Renderer& renderer, const std::vector<SceneMaterial>& materials);
 	void resetAccumulation() { mResetAccumulation = true; }
 	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
+	double gpuMilliseconds() const { return mGpuMilliseconds; }
 	void render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 		ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer);
 
@@ -68,4 +69,9 @@ private:
 	uint32_t mRestirFrame = 0;
 	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
 	float mPreviousViewportLeft = 0;
+	ComPtr<ID3D12QueryHeap> mTimestampHeap;
+	ComPtr<ID3D12Resource> mTimestampReadback;
+	uint64_t mTimestampFrequency = 0;
+	bool mHasTimestamp = false;
+	double mGpuMilliseconds = -1;
 };

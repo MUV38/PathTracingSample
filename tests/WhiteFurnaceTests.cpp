@@ -91,7 +91,7 @@ std::filesystem::path executableDirectory()
 	}
 	return std::filesystem::path(path.data()).parent_path();
 }
-std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
+std::vector<Result> integrate(const std::vector<Test>& tests, bool warp, bool sparseEnvironment = false)
 {
 	ComPtr<IDXGIFactory6> factory;
 	check(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)), "Create DXGI factory");
@@ -181,7 +181,22 @@ std::vector<Result> integrate(const std::vector<Test>& tests, bool warp)
 	// normalization, 2D CDF inversion, rotation, and PDF agreement together.
 	EnvironmentMap proposal{16, 8, std::vector<std::array<float,4>>(128, {1,1,1,1})};
 	proposal.mPixels[37] = {1000,1000,1000,1};
-	const auto distribution = createEnvironmentDistribution(proposal);
+	auto distribution = createEnvironmentDistribution(proposal);
+	if (sparseEnvironment)
+	{
+		// A valid proposal with only one nonzero cell exercises the BSDF
+		// complement where rounded CDF bins have no sampling probability.
+		const float cellAngle = static_cast<float>((2 * 3.141592653589793 / 16)
+			* (std::cos(3 * 3.141592653589793 / 8) - std::cos(4 * 3.141592653589793 / 8)));
+		for (unsigned y = 0; y < 8; ++y)
+		{
+			distribution[y] = {y < 3 ? 0.0f : 1.0f, 0};
+			for (unsigned x = 0; x < 16; ++x)
+			{
+				distribution[8 + y * 16 + x] = {x < 11 ? 0.0f : 1.0f, y == 3 && x == 11 ? 1.0f / cellAngle : 0.0f};
+			}
+		}
+	}
 	const size_t distributionBytes = distribution.size() * sizeof(distribution[0]);
 	auto environment = buffer(device.Get(), distributionBytes, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	check(environment->Map(0, &noRead, &mapped), "Map furnace environment");
@@ -483,6 +498,87 @@ void checkRestir(const std::filesystem::path& directory, bool warp)
 	}
 	std::cout << "ReSTIR reservoir checks passed: " << tests.size() << " cases.\n";
 }
+void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
+{
+	for (bool sparse : {false, true})
+	{
+		std::vector<Test> tests;
+		for (bool mixed : {false, true})
+		{
+			for (float noV : {1.0f, 0.1f})
+			{
+				for (unsigned material = 0; material < 5; ++material)
+				{
+					for (uint32_t mode = 0; mode < 4; ++mode)
+					{
+						CaseData data{{0.2f,0.5f,0.8f}, 0, 0.6f, 0, noV, 2048u | (mode << 9u) | (mixed ? 4096u : 0u)};
+						if (material == 1)
+						{
+							data.mSpecular = 1;
+						}
+						if (material == 2)
+						{
+							data.mMetallic = 1;
+							data.mSpecular = 0.5f;
+						}
+						if (material == 3)
+						{
+							data.mBaseColor = {0,0,0};
+						}
+						if (material == 4)
+						{
+							data.mBaseColor = {1,1,1};
+							data.mMetallic = 1;
+							data.mRoughness = 0;
+						}
+						tests.push_back({data, "environment-reservoir", {}});
+					}
+				}
+			}
+		}
+		const auto results = integrate(tests, warp, sparse);
+		std::ofstream csv(directory / (sparse ? L"restir-environment-sparse.csv" : L"restir-environment.csv"));
+		csv << "case,mode,mixed,channel,mean,standard_error,baseline,variance,pass\n" << std::setprecision(9);
+		size_t failures = 0;
+		const double formFactor = 4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25));
+		for (size_t index = 0; index < tests.size(); ++index)
+		{
+			const auto& result = results[index];
+			const auto& data = tests[index].mData;
+			const auto& baseline = results[index - index % 4];
+			const unsigned material = static_cast<unsigned>((index / 4) % 5);
+			const bool mixed = (data.mFlags & 4096u) != 0;
+			for (size_t axis = 0; axis < 3; ++axis)
+			{
+				const double error = std::sqrt(result.mVariance[axis] / sampleCount);
+				const double combinedError = std::sqrt((result.mVariance[axis] + baseline.mVariance[axis]) / sampleCount);
+				bool pass = result.mInvalid == 0 && std::isfinite(result.mMean[axis]) && std::isfinite(error)
+					&& result.mMean[axis] >= 0 && std::abs(result.mMean[axis] - baseline.mMean[axis]) <= 0.002 + 6 * combinedError;
+				if (material == 0 || material == 3)
+				{
+					const double expected = data.mBaseColor[axis] * (1 + (mixed ? formFactor : 0));
+					pass &= std::abs(result.mMean[axis] - expected) <= 0.0005 + 6 * error;
+				}
+				if (material == 4)
+				{
+					pass &= std::abs(result.mMean[axis] - (mixed && data.mNoV == 1 ? 2.0 : 1.0)) < 0.0005;
+				}
+				csv << index / 4 << ',' << index % 4 << ',' << mixed << ',' << axis << ',' << result.mMean[axis] << ',' << error << ',' << baseline.mMean[axis] << ',' << result.mVariance[axis] << ',' << pass << '\n';
+				if (!pass)
+				{
+					++failures;
+					std::cerr << "IBL reservoir FAIL: sparse=" << sparse << " case=" << index << " channel=" << axis << '\n';
+				}
+			}
+		}
+		csv.close();
+		if (!csv || failures)
+		{
+			throw std::runtime_error("IBL ReSTIR checks failed; inspect restir-environment CSV files.");
+		}
+		std::cout << "IBL ReSTIR checks passed: " << tests.size() << " cases, sparse=" << sparse << ".\n";
+	}
+}
 void writeRectangleFixtures(const std::filesystem::path& directory)
 {
 	SceneData scene;
@@ -627,6 +723,7 @@ int wmain(int count, wchar_t** arguments)
 		std::cout << "White furnace passed: " << tests.size() << " cases, " << sampleCount << " samples/case. CSV: " << (directory / L"furnace.csv").string() << '\n';
 		checkRussianRoulette(directory, count == 3);
 		checkRestir(directory, count == 3);
+		checkRestirEnvironment(directory, count == 3);
 		return 0;
 	}
 	catch (const std::exception& error)

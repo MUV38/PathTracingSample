@@ -20,8 +20,35 @@ struct LightReservoir
 	float weightSum;
 	float target;
 	float count;
-	uint padding;
+	float proposalPdf;
 };
+static const uint environmentLightIndex = 0xffffffffu;
+float2 encodeEnvironmentSample(float3 direction)
+{
+	return float2(atan2(direction.z, direction.x), direction.y);
+}
+float3 decodeEnvironmentSample(float2 encoded)
+{
+	float sine = sqrt(max(0.0f, 1.0f - encoded.y * encoded.y));
+	return float3(sine * cos(encoded.x), encoded.y, sine * sin(encoded.x));
+}
+float3 evaluateEnvironmentReservoirSample(Surface surface, float3 view, float3 direction, float3 radiance, float environmentPdf)
+{
+	float noL = dot(surface.normal, direction);
+	if (noL <= 0 || dot(surface.geometricNormal, direction) <= 0)
+	{
+		return 0;
+	}
+	float bsdfPdf;
+	float3 bsdf = evaluateBsdf(surface, view, direction, bsdfPdf);
+	// Resample the light-side MIS integral, retaining the complementary BSDF
+	// estimator. This handles filtered HDR peaks and narrow specular lobes.
+	return bsdf * noL * surface.occlusion * radiance * powerHeuristic(environmentPdf, bsdfPdf);
+}
+float environmentReservoirHitWeight(float environmentPdf, float bsdfPdf, bool delta)
+{
+	return delta ? 1.0f : powerHeuristic(bsdfPdf, environmentPdf);
+}
 void streamReservoir(inout LightReservoir reservoir, LightReservoir candidate, float target, float weight, float count, float u)
 {
 	reservoir.count += count;
@@ -31,6 +58,7 @@ void streamReservoir(inout LightReservoir reservoir, LightReservoir candidate, f
 		reservoir.lightIndex = candidate.lightIndex;
 		reservoir.uv = candidate.uv;
 		reservoir.target = target;
+		reservoir.proposalPdf = candidate.proposalPdf;
 	}
 }
 void finishReservoir(inout LightReservoir reservoir)
