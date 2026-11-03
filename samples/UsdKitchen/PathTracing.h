@@ -16,5 +16,6 @@ struct PathTracing
 	uint32_t mRestirDebug = 0;
 	uint32_t mGiMode = 0;
 	bool mGiHistory = true;
+	bool mGiSpatial = true;
 	uint32_t mGiView = 0;
 };

@@ -337,11 +337,16 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--restir-gi" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			if (value != L"off" && value != L"candidates" && value != L"temporal")
+			if (value != L"off" && value != L"candidates" && value != L"temporal" && value != L"spatial")
 			{
-				throw std::runtime_error("--restir-gi expects off, candidates, or temporal.");
+				throw std::runtime_error("--restir-gi expects off, candidates, temporal, or spatial.");
 			}
-			mTracing.mGiMode = value == L"temporal" ? 2u : (value == L"candidates" ? 1u : 0u);
+			mTracing.mGiMode = value == L"spatial" ? 3u : value == L"temporal" ? 2u : (value == L"candidates" ? 1u : 0u);
+			continue;
+		}
+		if (flag == L"--no-gi-spatial")
+		{
+			mTracing.mGiSpatial = false;
 			continue;
 		}
 		if (flag == L"--no-gi-history")
@@ -352,11 +357,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--gi-view" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			const std::array<std::wstring,10> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy"};
+			const std::array<std::wstring,11> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy", L"spatial"};
 			const auto view = std::find(views.begin(), views.end(), value);
 			if (view == views.end())
 			{
-				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, or diffuse-noisy.");
+				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, diffuse-noisy, or spatial.");
 			}
 			mTracing.mGiView = static_cast<uint32_t>(view - views.begin());
 			continue;
@@ -950,15 +955,16 @@ void UsdKitchen::drawGui()
 	if (ImGui::CollapsingHeader("ReSTIR GI"))
 	{
 		int mode = static_cast<int>(mTracing.mGiMode);
-		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0");
+		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0");
 		mTracing.mGiMode = static_cast<uint32_t>(mode);
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
+		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
 		int view = static_cast<int>(mTracing.mGiView);
-		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0");
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
-		ImGui::TextWrapped("Temporal mode reuses one previous raw candidate with balance MIS. Only flat Lambertian secondary surfaces are reused; glossy transport stays in ordinary PT. No recursive or spatial reuse.");
+		ImGui::TextWrapped("Temporal mode reuses one previous raw candidate with balance MIS. Only flat Lambertian secondary surfaces are reused; glossy transport stays in ordinary PT. Spatial mode also reuses four current raw neighbors. No recursive reuse.");
 		ImGui::TextWrapped("Primary roughness below 0.2 and pure metals use ordinary PT. Diagnostic views enable candidate generation and bypass RR. Normal/PDF/valid use fixed samples.");
-		ImGui::TextWrapped("160 bytes/pixel per raw buffer. Temporal mode uses two buffers; only the first sample is saved. Changing lighting/materials, resize, reset or camera cuts discards history.");
+		ImGui::TextWrapped("160 bytes/pixel per raw buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
 	{

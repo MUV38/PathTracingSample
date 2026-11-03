@@ -219,7 +219,8 @@ NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBL
 `ReSTIR GI` または `--restir-gi candidates` で、既存PTから拡散間接光の候補を生成し、再利用なしで評価します。
 `--gi-view diffuse|remainder|radiance|normal|pdf|valid|error` で成分・候補を確認できます。通常表示は `--gi-view output` です。
 `--restir-gi temporal` は平坦なLambert二次面の候補を前フレームから1つ再利用します。対象外の鏡面などは通常PTで評価します。
-`--no-gi-history` で再利用なしと比較でき、`--gi-view history` と `--gi-view diffuse-noisy` で履歴と1フレームのGIを確認できます。
+`--restir-gi spatial` は時間再利用に加え、同じフレームの近隣4画素から候補を再利用します。生候補を準備するため、描画の前に1画素あたり1経路のプリパスを追加します。
+`--no-gi-spatial` と `--no-gi-history` で各再利用を個別に無効化でき、`--gi-view history|spatial|diffuse-noisy` で候補の受理・選択や非蓄積GIを確認できます。
 再帰的な履歴蓄積と空間再利用は未実装です。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 
