@@ -40,6 +40,9 @@ BRDFの数値検証に加え、UsdKitchenで白色環境の画像を撮影・判
 
 ## ビルドと実行
 
+CLASを自分で実装するための検証プロジェクトは [ClasSandbox](samples/ClasSandbox/README.md) です。
+meshletのGPU入力と通常DXRの比較描画を用意し、CLAS処理は未実装箇所として分離しています。
+
 必要な環境:
 
 - Agility SDK対応のWindows 11、または更新済みWindows 10

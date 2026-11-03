@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals">
+		<ProjectGuid>{D74AA697-C6EF-4C79-91E2-B18287CA0D52}</ProjectGuid>
+	</PropertyGroup>
+	<Import Project="..\..\build_support\Cpp.props" />
+	<PropertyGroup>
+		<DxcExecutable>$([System.String]::Copy('$(WindowsSDK_ExecutablePath_x64)').Split(';')[0])\dxc.exe</DxcExecutable>
+	</PropertyGroup>
+	<!-- Optional, machine-local SM 6.10 compiler and user-authored shader source. -->
+	<Import Project="..\..\build_support\Clas.local.props" Condition="Exists('..\..\build_support\Clas.local.props')" />
+	<ItemGroup>
+		<ClCompile Include="Main.cpp" />
+		<ClCompile Include="ClasSandbox.cpp" />
+		<ClCompile Include="ClasExperiment.cpp" />
+		<ClInclude Include="ClasSandbox.h" />
+		<ClInclude Include="ClasExperiment.h" />
+		<ClInclude Include="SceneBindings.hlsli" />
+		<None Include="README.md" />
+		<ProjectReference Include="..\..\common\SampleFramework.vcxproj">
+			<Project>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</Project>
+		</ProjectReference>
+		<CustomBuild Include="Reference.hlsl">
+			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Zi -Qembed_debug -Fo "$(OutDir)Reference.dxil" "%(FullPath)"</Command>
+			<Outputs>$(OutDir)Reference.dxil</Outputs>
+			<AdditionalInputs>$(ProjectDir)SceneBindings.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<Message>Compiling reference meshlet DXR shaders</Message>
+		</CustomBuild>
+		<CustomBuild Include="$(ClasShaderSource)" Condition="'$(ClasShaderSource)'!=''">
+			<Command>"$(ClasDxcExecutable)" -T lib_6_10 -HV 2021 -WX -Zi -Qembed_debug -I "$(ProjectDir)." -Fo "$(OutDir)Clas.dxil" "%(FullPath)"</Command>
+			<Outputs>$(OutDir)Clas.dxil</Outputs>
+			<AdditionalInputs>$(ProjectDir)SceneBindings.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<Message>Compiling user CLAS shader library (SM 6.10)</Message>
+		</CustomBuild>
+		<Content Include="$(RepositoryRoot)assets\PreviewRoom.ptscene">
+			<Link>assets\PreviewRoom.ptscene</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+	<Import Project="..\..\build_support\Cpp.targets" />
+	<Target Name="CheckShaderCompilers" BeforeTargets="CustomBuild">
+		<Error Condition="!Exists('$(DxcExecutable)')" Text="DXC was not found in the selected Windows SDK." />
+		<Error Condition="'$(ClasShaderSource)'!='' And !Exists('$(ClasDxcExecutable)')" Text="Set ClasDxcExecutable to the SM 6.10 preview DXC executable. See samples/ClasSandbox/README.md. No compiler is downloaded automatically." />
+	</Target>
+</Project>

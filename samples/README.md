@@ -3,6 +3,7 @@
 `SampleFramework` がWin32メッセージループ、D3D12デバイス、スワップチェーン、ImGui、GPU同期、撮影を担当します。
 サンプルは継承せず、`common/Sample.h` の `Sample` に必要なコールバックを設定します。
 最小の例は `Clear/Main.cpp`、DXRの例は `DxrCube/` です。
+CLASの実装を自分で追加するための検証環境は [`ClasSandbox/`](ClasSandbox/README.md) です。meshlet入力、通常DXRの比較描画、対応状況の診断、空のCLAS実装箇所を用意しています。
 
 1. `samples/MySample/` に `Main.cpp` と以下の `MySample.vcxproj` を配置します。GUIDは新しく生成してください。
 2. ルートの `PathTracingSample.slnx` の `/Samples/` に `<Project Path="samples/MySample/MySample.vcxproj" />` を追加します。
