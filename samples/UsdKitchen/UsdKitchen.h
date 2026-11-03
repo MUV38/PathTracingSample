@@ -34,6 +34,7 @@ private:
 	void pollConversion();
 	void cancelConversion();
 	void readConversionLog();
+	void updateGiValidation(Renderer& renderer);
 	Renderer* mRenderer = nullptr;
 	MeshRaytracer mRaytracer;
 	Camera mCamera;
@@ -68,6 +69,9 @@ private:
 	std::filesystem::path mConfiguredOutput;
 	std::filesystem::path mGpuTimingPath;
 	std::ofstream mGpuTimingLog;
+	std::ofstream mGiValidationLog;
+	uint32_t mGiValidationFrame = 0;
+	const char* mGiValidationEvent = "none";
 	std::filesystem::path mPendingBinary;
 	std::filesystem::path mLogPath;
 	std::array<char, 4096> mUsdInput{};

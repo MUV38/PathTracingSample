@@ -25,6 +25,7 @@ public:
 	void resetAccumulation() { mResetAccumulation = true; }
 	uint64_t accumulatedSamples() const { return static_cast<uint64_t>(mAccumulatedFrames) * mLastSamplesPerFrame; }
 	double gpuMilliseconds() const { return mGpuMilliseconds; }
+	bool giHistoryUsedLastFrame() const { return mLastGiHistoryValid; }
 	RayReconstruction& rayReconstruction() { return mRayReconstruction; }
 	bool rayReconstructionEnabled() const { return mUseRayReconstruction; }
 	void setRayReconstructionEnabled(bool enabled) { mUseRayReconstruction = enabled; }
@@ -73,7 +74,11 @@ private:
 	std::vector<uint8_t> mPreviousConstants;
 	std::array<ComPtr<ID3D12Resource>,5> mRestirBuffers;
 	ComPtr<ID3D12Resource> mGiCandidates;
+	ComPtr<ID3D12Resource> mPreviousGiCandidates;
 	size_t mGiPixels = 0;
+	size_t mPreviousGiPixels = 0;
+	bool mGiHistoryValid = false;
+	bool mLastGiHistoryValid = false;
 	size_t mRestirPixels = 0;
 	bool mRestirHistoryValid = false;
 	uint32_t mRestirFrame = 0;

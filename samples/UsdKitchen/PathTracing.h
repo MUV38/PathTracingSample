@@ -14,6 +14,7 @@ struct PathTracing
 	bool mRussianRoulette = true;
 	uint32_t mRestirMode = 0;
 	uint32_t mRestirDebug = 0;
-	bool mGiCandidates = false;
+	uint32_t mGiMode = 0;
+	bool mGiHistory = true;
 	uint32_t mGiView = 0;
 };

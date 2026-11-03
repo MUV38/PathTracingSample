@@ -140,15 +140,30 @@ int wmain(int count, wchar_t** arguments)
 		testDistribution();
 		const std::filesystem::path directory = arguments[1];
 		std::filesystem::create_directories(directory);
-		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark"})
+		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored"})
 		{
 			const std::wstring mode = name;
-			auto scene = fixture(mode == L"shadow", mode == L"mirror", mode == L"multiple", mode == L"dark");
+			const bool gi = mode == L"gi-colored";
+			auto scene = fixture(mode == L"shadow" || gi, mode == L"mirror", mode == L"multiple" || gi, mode == L"dark");
+			if (gi)
+			{
+				// A GGX+diffuse primary floor, Lambertian secondary blocker, two colored emitters.
+				scene.mMaterials.push_back(scene.mMaterials[0]);
+				scene.mMaterials[0].mSpecular = 0.5f;
+				for (size_t meshletIndex = 1; meshletIndex <= 5; ++meshletIndex)
+				{
+					const auto& meshlet = scene.mMeshlets[meshletIndex];
+					for (uint32_t index = 0; index < meshlet.mVertexCount; ++index)
+					{
+						scene.mVertices[scene.mMeshletVertices[meshlet.mVertexOffset + index]].mMaterialIndex = 3;
+					}
+				}
+			}
 			const auto path = directory / (mode + L".ptscene");
 			writeSceneFile(path, scene);
 			const auto loaded = readSceneFile(path);
 			auto lights = createMeshLights(loaded.mVertices, meshletTriangleIndices(loaded));
-			const uint32_t expected = mode == L"dark" ? 0 : mode == L"multiple" ? 4 : 2;
+			const uint32_t expected = mode == L"dark" ? 0 : (mode == L"multiple" || gi) ? 4 : 2;
 			require(updateMeshLightDistribution(lights, loaded.mMaterials) == expected, "Fixture lost its emissive triangles.");
 		}
 		std::cout << "Mesh light CPU tests passed; fixtures: " << directory.string() << '\n';

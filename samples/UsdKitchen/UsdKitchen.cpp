@@ -125,6 +125,21 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	for (size_t index = 0; index < arguments.size(); ++index)
 	{
 		const auto& flag = arguments[index];
+		if (flag == L"--gi-validation" && index + 1 < arguments.size())
+		{
+			const std::filesystem::path path = arguments[++index];
+			if (!path.parent_path().empty())
+			{
+				std::filesystem::create_directories(path.parent_path());
+			}
+			mGiValidationLog.open(path);
+			if (!mGiValidationLog)
+			{
+				throw std::runtime_error("Cannot create GI validation CSV.");
+			}
+			mGiValidationLog << "frame,event,history,width,height\n";
+			continue;
+		}
 		if (flag == L"--rr-view" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -322,21 +337,26 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--restir-gi" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			if (value != L"off" && value != L"candidates")
+			if (value != L"off" && value != L"candidates" && value != L"temporal")
 			{
-				throw std::runtime_error("--restir-gi expects off or candidates (no reuse yet).");
+				throw std::runtime_error("--restir-gi expects off, candidates, or temporal.");
 			}
-			mTracing.mGiCandidates = value == L"candidates";
+			mTracing.mGiMode = value == L"temporal" ? 2u : (value == L"candidates" ? 1u : 0u);
+			continue;
+		}
+		if (flag == L"--no-gi-history")
+		{
+			mTracing.mGiHistory = false;
 			continue;
 		}
 		if (flag == L"--gi-view" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			const std::array<std::wstring,8> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error"};
+			const std::array<std::wstring,10> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy"};
 			const auto view = std::find(views.begin(), views.end(), value);
 			if (view == views.end())
 			{
-				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, or error.");
+				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, or diffuse-noisy.");
 			}
 			mTracing.mGiView = static_cast<uint32_t>(view - views.begin());
 			continue;
@@ -710,9 +730,58 @@ void UsdKitchen::update(Renderer& renderer, float deltaTime)
 {
 	pollConversion();
 	mController.update(mCamera, renderer, deltaTime, mFocusPoint);
+	if (mGiValidationLog.is_open() && mHasScene)
+	{
+		updateGiValidation(renderer);
+	}
 	if (!ImGui::GetIO().WantCaptureKeyboard && ImGui::IsKeyPressed(ImGuiKey_F, false))
 	{
 		frameModel();
+	}
+}
+
+void UsdKitchen::updateGiValidation(Renderer& renderer)
+{
+	// Explicit CLI-only integration test sequence. Ordinary runs never enter here.
+	mGiValidationEvent = "none";
+	if (mGiValidationFrame >= 12 && mGiValidationFrame < 20)
+	{
+		auto pivot = mFocusPoint;
+		pivot.x += mRadius * 0.001f * float(mGiValidationFrame - 11);
+		mCamera.focus(pivot);
+		mGiValidationEvent = "pan";
+	}
+	if (mGiValidationFrame == 24)
+	{
+		mCamera.setOrbit(mCamera.yaw() + 1.3f, mCamera.pitch(), mCamera.distance());
+		mGiValidationEvent = "cut";
+	}
+	if (mGiValidationFrame == 36)
+	{
+		mRaytracer.resetAccumulation();
+		mGiValidationEvent = "reset";
+	}
+	if (mGiValidationFrame == 48)
+	{
+		mLighting.mDirectionalStrength += 1;
+		mGiValidationEvent = "light";
+	}
+	if (mGiValidationFrame == 60)
+	{
+		mMaterials[0].mBaseColor[0] *= 0.8f;
+		mRaytracer.updateMaterials(renderer, mMaterials);
+		mGiValidationEvent = "material";
+	}
+	if (mGiValidationFrame == 72)
+	{
+		RECT rectangle{};
+		if (!GetWindowRect(renderer.window(), &rectangle)
+			|| !SetWindowPos(renderer.window(), nullptr, 0, 0, rectangle.right - rectangle.left + 128,
+				rectangle.bottom - rectangle.top + 64, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+		{
+			throw std::runtime_error("GI validation resize failed.");
+		}
+		mGiValidationEvent = "resize-request";
 	}
 }
 
@@ -878,15 +947,18 @@ void UsdKitchen::drawGui()
 		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
 		ImGui::TextWrapped("Primary IBL, emissive mesh and rectangle lighting. Secondary bounces use existing NEE / MIS.");
 	}
-	if (ImGui::CollapsingHeader("ReSTIR GI / initial candidates"))
+	if (ImGui::CollapsingHeader("ReSTIR GI"))
 	{
-		ImGui::Checkbox("Generate diffuse GI candidates", &mTracing.mGiCandidates);
+		int mode = static_cast<int>(mTracing.mGiMode);
+		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0");
+		mTracing.mGiMode = static_cast<uint32_t>(mode);
+		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		int view = static_cast<int>(mTracing.mGiView);
-		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Reconstruction error x1000\0");
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
-		ImGui::TextWrapped("One candidate from each PT path; no temporal/spatial reuse. Output replaces the diffuse indirect term, preserving the original proposal and MIS.");
+		ImGui::TextWrapped("Temporal mode reuses one previous raw candidate with balance MIS. Only flat Lambertian secondary surfaces are reused; glossy transport stays in ordinary PT. No recursive or spatial reuse.");
 		ImGui::TextWrapped("Primary roughness below 0.2 and pure metals use ordinary PT. Diagnostic views enable candidate generation and bypass RR. Normal/PDF/valid use fixed samples.");
-		ImGui::TextWrapped("Candidate buffer: 96 bytes/pixel while enabled; stores the first sample of the current frame only.");
+		ImGui::TextWrapped("160 bytes/pixel per raw buffer. Temporal mode uses two buffers; only the first sample is saved. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
 	{
@@ -1001,6 +1073,16 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 	if (mHasScene)
 	{
 		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mTracing, mExposure, mMeshletColors, commands, backBuffer);
+		if (mGiValidationLog.is_open())
+		{
+			mGiValidationLog << mGiValidationFrame++ << ',' << mGiValidationEvent << ',' << mRaytracer.giHistoryUsedLastFrame()
+				<< ',' << renderer.width() << ',' << renderer.height() << '\n';
+			mGiValidationLog.flush();
+			if (!mGiValidationLog)
+			{
+				throw std::runtime_error("Writing GI validation CSV failed.");
+			}
+		}
 		if (mRaytracer.gpuMilliseconds() >= 0)
 		{
 			mScreenshotGpuMilliseconds += mRaytracer.gpuMilliseconds();
