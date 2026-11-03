@@ -2,6 +2,7 @@
 
 `UsdKitchen` は、別プロジェクトでUSDから変換した `.ptscene` を読み、単一BLAS / TLASでDXR描画します。
 OpenUSDのヘッダー、DLL、Pythonは表示アプリに不要です。ルートの `.slnx` はUSD SDKなしでビルドできます。
+Streamline 2.14.16のヘッダーは `tools/RestoreStreamline.ps1` で復元します。任意のDLSS Ray Reconstruction（ネイティブ解像度／DLAA）は `--rr` またはUIから有効にできます。[SDKと実行DLLの導入・比較・検証](../../tests/RayReconstruction.md) を参照してください。
 既存のWASDフリーカメラ、Alt回転・パン・ドリー、ホイールによる速度変更、撮影機能を利用できます。
 F / Frame modelはシーン全体にカメラを合わせます。Exposureで表示を調整できます。
 

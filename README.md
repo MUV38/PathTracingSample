@@ -2,6 +2,7 @@
 
 Visual Studio 2026で開く、Win32 / DirectX 12 / DXRのサンプル集です。
 Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
+UsdKitchenのビルド前に `.\tools\RestoreStreamline.ps1` でStreamline **2.14.16** を復元してください。対応RTX GPUではDLSS Ray Reconstructionを利用できます。DLLのライセンス確認と配置、`--rr` による実行は [RRの導入手順](tests/RayReconstruction.md) を参照してください。
 
 ## サンプル
 
@@ -157,6 +158,12 @@ GPU読み戻し後、Windows標準のWICでPNGを保存します。
 自動確認では3フレーム描画後に指定先へ撮影して終了します。
 UsdKitchenで蓄積後に確認する場合は `--samples 128` などを併用すると、指定数以上のサンプルが蓄積するまで待ってから撮影します。
 相対パスはカレントディレクトリ基準で、必要な親フォルダを作成し、既存ファイルは上書きします。
+
+`--screenshot-count 16` を併用すると、撮影開始後の連続した16描画フレームを `rr-0000.png` ～ `rr-0015.png` のように保存して終了します。指定範囲は1～256で、1枚の場合は従来どおり指定したファイル名を使います。PNG保存中は描画が待つため、実時間のFPS計測用には使わないでください。
+
+```powershell
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --rr --samples 128 --spp 1 --screenshot-count 16 --screenshot build/checks/rr.png
+```
 
 ```powershell
 $app = Start-Process -FilePath .\build\x64\Release\DxrCube\DxrCube.exe -ArgumentList '--screenshot "build/checks/dxr-cube.png"' -PassThru -Wait

@@ -11,9 +11,9 @@
     <Project Path="samples/UsdKitchen/UsdKitchen.vcxproj" DefaultStartup="true" Id="f4680a75-5d93-4afb-a63a-79dc02ccb6c8" />
   </Folder>
   <Folder Name="/Tests/">
-    <Project Path="tests/MeshLightTests.vcxproj" />
-    <Project Path="tests/WhiteFurnaceTests.vcxproj" />
-    <Project Path="tests/EnvironmentMapTests.vcxproj" />
+    <Project Path="tests/MeshLightTests.vcxproj" Id="df839bf4-0e2a-4940-9d41-d7708da24269" />
+    <Project Path="tests/WhiteFurnaceTests.vcxproj" Id="a308ce85-3f87-42d3-931a-c7875447f36d" />
+    <Project Path="tests/EnvironmentMapTests.vcxproj" Id="71c3a6aa-6c39-419a-8c45-1796e89315b6" />
     <Project Path="tests/CameraTests.vcxproj" Id="b2a41a65-0885-4a57-b9e6-f14cc56f2c94" />
     <Project Path="tests/SceneFileTests.vcxproj" Id="410f9919-95aa-41a3-aebf-818b8936c841" />
   </Folder>

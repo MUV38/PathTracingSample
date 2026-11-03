@@ -125,6 +125,24 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	for (size_t index = 0; index < arguments.size(); ++index)
 	{
 		const auto& flag = arguments[index];
+		if (flag == L"--rr-view" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			const std::array<std::wstring, 9> views = {L"output", L"noisy", L"normal", L"roughness", L"diffuse", L"specular", L"motion", L"depth", L"hit-distance"};
+			const auto view = std::find(views.begin(), views.end(), value);
+			if (view == views.end())
+			{
+				throw std::runtime_error("--rr-view expects output, noisy, normal, roughness, diffuse, specular, motion, depth, or hit-distance.");
+			}
+			mRaytracer.setRayReconstructionView(static_cast<uint32_t>(view - views.begin()));
+			mRaytracer.setRayReconstructionEnabled(true);
+			continue;
+		}
+		if (flag == L"--rr" || flag == L"--no-rr")
+		{
+			mRaytracer.setRayReconstructionEnabled(flag == L"--rr");
+			continue;
+		}
 		if (flag == L"--add-rect-light")
 		{
 			if (mLighting.mRectangleCount == Lighting::maximumRectangles)
@@ -426,7 +444,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl" && flag != L"--conversion-output") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --ibl-rotation <-180..180>, --gpu-timing <file.csv>, --gpu-budget-ms <100..5000>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light / --no-rect-light, --add-rect-light, --rect-index <slot>, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --rr / --no-rr, --rr-view <output|noisy|normal|roughness|diffuse|specular|motion|depth|hit-distance>, --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --ibl-rotation <-180..180>, --gpu-timing <file.csv>, --gpu-budget-ms <100..5000>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light / --no-rect-light, --add-rect-light, --rect-index <slot>, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -454,12 +472,17 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	{
 		throw std::runtime_error("Choose either --model or --usd, not both.");
 	}
+	mRaytracer.rayReconstruction().start();
 }
 
 void UsdKitchen::initialize(Renderer& renderer)
 {
 	mRenderer = &renderer;
 	mRaytracer.initialize(renderer);
+	if (mRaytracer.rayReconstructionEnabled() && !mRaytracer.rayReconstruction().supported())
+	{
+		throw std::runtime_error(mRaytracer.rayReconstruction().status());
+	}
 	if (!mGpuTimingPath.empty())
 	{
 		if (!mGpuTimingPath.parent_path().empty())
@@ -833,9 +856,33 @@ void UsdKitchen::drawGui()
 		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
 		ImGui::TextWrapped("Primary IBL, emissive mesh and rectangle lighting. Secondary bounces use existing NEE / MIS.");
 	}
+	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::BeginDisabled(!mRaytracer.rayReconstruction().supported());
+		bool enabled = mRaytracer.rayReconstructionEnabled();
+		if (ImGui::Checkbox("Ray Reconstruction (native / DLAA)", &enabled))
+		{
+			mRaytracer.setRayReconstructionEnabled(enabled);
+		}
+		ImGui::EndDisabled();
+		int view = static_cast<int>(mRaytracer.rayReconstructionView());
+		if (ImGui::Combo("RR view", &view, "Output\0Noisy HDR\0Normal\0Roughness\0Diffuse albedo\0Specular albedo\0Motion\0Depth\0Specular hit distance\0"))
+		{
+			mRaytracer.setRayReconstructionView(static_cast<uint32_t>(view));
+		}
+		ImGui::TextWrapped("%s", mRaytracer.rayReconstruction().status().c_str());
+		ImGui::TextWrapped("RR receives the current noisy HDR frame. Long-term accumulation is used only with RR off.");
+		ImGui::TextWrapped("G-buffer and meshlet views bypass RR.");
+		ImGui::TextWrapped("Normal and other guides use pixel centers. Noisy HDR shows the jittered input.");
+		if (mRaytracer.gpuMilliseconds() >= 0)
+		{
+			ImGui::Text("Scene GPU: %.2f ms", mRaytracer.gpuMilliseconds());
+		}
+	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{
-		ImGui::Text("Accumulated samples: %llu", static_cast<unsigned long long>(mRaytracer.accumulatedSamples()));
+		ImGui::Text(mRaytracer.rayReconstructionEnabled() ? "Rendered samples (RR): %llu" : "Accumulated samples: %llu",
+			static_cast<unsigned long long>(mRaytracer.accumulatedSamples()));
 		int bounces = static_cast<int>(mTracing.mMaxBounces);
 		int samples = static_cast<int>(mTracing.mSamplesPerFrame);
 		ImGui::SliderInt("Path bounces", &bounces, 0, 8, "%d", ImGuiSliderFlags_AlwaysClamp);

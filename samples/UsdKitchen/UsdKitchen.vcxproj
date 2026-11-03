@@ -4,13 +4,21 @@
 	<Import Project="..\..\build_support\Cpp.props" />
 	<PropertyGroup>
 		<DxcExecutable>$([System.String]::Copy('$(WindowsSDK_ExecutablePath_x64)').Split(';')[0])\dxc.exe</DxcExecutable>
+		<StreamlineRoot>$(RepositoryRoot)packages\Streamline-2.14.16\</StreamlineRoot>
 	</PropertyGroup>
+	<Import Project="..\..\build_support\Streamline.local.props" Condition="Exists('..\..\build_support\Streamline.local.props')" />
+	<ItemDefinitionGroup>
+		<ClCompile><AdditionalIncludeDirectories>$(StreamlineRoot)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+	</ItemDefinitionGroup>
 	<ItemGroup>
 		<ClCompile Include="Main.cpp" />
 		<ClCompile Include="UsdKitchen.cpp" />
 		<ClCompile Include="MeshRaytracer.cpp" />
 		<ClCompile Include="EnvironmentMap.cpp" />
 		<ClCompile Include="MeshLight.cpp" />
+		<ClCompile Include="RayReconstruction.cpp" />
+		<ClInclude Include="RayReconstruction.h" />
+		<ClInclude Include="RayReconstruction.hlsli" />
 		<ClInclude Include="MeshLight.h" />
 		<ClInclude Include="MeshLight.hlsli" />
 		<ClInclude Include="UsdKitchen.h" />
@@ -30,7 +38,7 @@
 		<CustomBuild Include="Scene.hlsl">
 			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Fo "$(OutDir)Scene.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)Scene.dxil</Outputs>
-			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)RestirDI.hlsli;$(ProjectDir)RestirPasses.hlsli;$(ProjectDir)RussianRoulette.hlsli;$(ProjectDir)GgxEnergy.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)RayReconstruction.hlsli;$(ProjectDir)RestirDI.hlsli;$(ProjectDir)RestirPasses.hlsli;$(ProjectDir)RussianRoulette.hlsli;$(ProjectDir)GgxEnergy.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 			<Message>Compiling converted-mesh DXR shaders</Message>
 		</CustomBuild>
 		<Content Include="$(RepositoryRoot)assets\PreviewRoom.ptscene">
@@ -38,4 +46,15 @@
 		</Content>
 	</ItemGroup>
 	<Import Project="..\..\build_support\Cpp.targets" />
+	<Target Name="CheckStreamline" BeforeTargets="PrepareForBuild">
+		<Error Condition="!Exists('$(StreamlineRoot)include\sl.h')" Text="Streamline SDK 2.14.16 is missing. Run tools/RestoreStreamline.ps1." />
+	</Target>
+	<Target Name="CopyStreamline" AfterTargets="Build" Condition="'$(StreamlineRuntimeEnabled)'=='true'">
+		<ItemGroup>
+			<StreamlineDll Include="$(StreamlineRoot)bin\x64\sl.interposer.dll;$(StreamlineRoot)bin\x64\sl.common.dll;$(StreamlineRoot)bin\x64\sl.dlss_d.dll;$(StreamlineRoot)bin\x64\nvngx_dlssd.dll" />
+		</ItemGroup>
+		<Copy SourceFiles="@(StreamlineDll)" DestinationFolder="$(OutDir)Streamline\" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="$(StreamlineRoot)license.txt" DestinationFiles="$(OutDir)Streamline\streamline-license.txt" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="$(StreamlineRoot)bin\x64\nvngx_dlss.license.txt" DestinationFolder="$(OutDir)Streamline\" SkipUnchangedFiles="true" />
+	</Target>
 </Project>
