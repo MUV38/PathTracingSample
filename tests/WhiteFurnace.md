@@ -69,6 +69,7 @@ Lambertは解析的な矩形の形態係数（約0.23946）×Base Color、完全
 このテストにより、従来の半角ベクトルのFresnelだけで拡散項を抑制した実装では、斜め視線で約1.85倍の反射率が生じることを検出しました。
 数値実行の最後には [Russian Rouletteの14条件](RussianRoulette.md) も検証し、別の `roulette.csv` へ記録します。BRDFの4,128条件自体にはRRを適用しません。
 続いて [ReSTIRのReservoir 32条件](RestirDI.md) を検証し、`restir.csv` へ記録します。
+IBLのReservoirについても、通常CDFと確率0を含むCDFで各80条件を検証し、`restir-environment.csv` / `restir-environment-sparse.csv` へ記録します。
 拡散項へ視線側・入射光側の透過率を適用する修正後は、同じ条件・閾値で成功します。
 
 多重散乱は [Kulla–ContyのLUT近似](../tools/GgxEnergyLut/README.md) です。色付き金属には吸収があり、非金属の拡散層も簡略化しているため、すべての白いマテリアルが必ず反射率1になることは要求しません。

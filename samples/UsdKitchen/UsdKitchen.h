@@ -4,6 +4,7 @@
 #include "MeshRaytracer.h"
 
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -57,6 +58,8 @@ private:
 	std::filesystem::path mStartupUsd;
 	std::filesystem::path mConfiguredConverter;
 	std::filesystem::path mConfiguredOutput;
+	std::filesystem::path mGpuTimingPath;
+	std::ofstream mGpuTimingLog;
 	std::filesystem::path mPendingBinary;
 	std::filesystem::path mLogPath;
 	std::array<char, 4096> mUsdInput{};

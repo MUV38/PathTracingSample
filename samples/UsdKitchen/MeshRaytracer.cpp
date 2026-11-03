@@ -124,6 +124,13 @@ void MeshRaytracer::initialize(Renderer& renderer)
 	}
 	createPipeline();
 	createShaderTable();
+	D3D12_QUERY_HEAP_DESC timestampHeap{};
+	timestampHeap.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+	timestampHeap.Count = 2;
+	check(mDevice->CreateQueryHeap(&timestampHeap, IID_PPV_ARGS(&mTimestampHeap)), "Create lighting timestamp heap");
+	mTimestampReadback = createBuffer(mDevice.Get(), 2 * sizeof(uint64_t), D3D12_HEAP_TYPE_READBACK,
+		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
+	check(renderer.commandQueue()->GetTimestampFrequency(&mTimestampFrequency), "Read GPU timestamp frequency");
 	mGgxEnergy = uploadBuffer(mDevice.Get(), ggxEnergyLut.data(), sizeof(ggxEnergyLut));
 	mConstants = createBuffer(mDevice.Get(), 512, D3D12_HEAP_TYPE_UPLOAD,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
@@ -578,6 +585,18 @@ void MeshRaytracer::resizeRestir(size_t pixels)
 void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
+	// SampleFramework has completed the previous frame before this readback.
+	if (mHasTimestamp)
+	{
+		void* mapped = nullptr;
+		const D3D12_RANGE range{0, 2 * sizeof(uint64_t)};
+		check(mTimestampReadback->Map(0, &range, &mapped), "Read lighting GPU timestamps");
+		std::array<uint64_t,2> timestamps{};
+		std::memcpy(timestamps.data(), mapped, sizeof(timestamps));
+		const D3D12_RANGE noWrite{0,0};
+		mTimestampReadback->Unmap(0, &noWrite);
+		mGpuMilliseconds = static_cast<double>(timestamps[1] - timestamps[0]) * 1000.0 / static_cast<double>(mTimestampFrequency);
+	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
 		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4)
@@ -718,6 +737,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	accumulationBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	accumulationBarrier.UAV.pResource = mAccumulation.Get();
 	commands->ResourceBarrier(1, &accumulationBarrier);
+	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
 	if (needsPrimaryData)
 	{
 		D3D12_RESOURCE_BARRIER restirBarrier{};
@@ -732,6 +752,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	commands->DispatchRays(&dispatch);
+	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
+	commands->ResolveQueryData(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, mTimestampReadback.Get(), 0);
+	mHasTimestamp = true;
 	if (needsPrimaryData)
 	{
 		std::swap(mRestirBuffers[0], mRestirBuffers[1]);

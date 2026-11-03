@@ -330,16 +330,30 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			}
 			continue;
 		}
-		if (flag == L"--ibl-intensity" && index + 1 < arguments.size())
+		if (flag == L"--gpu-timing" && index + 1 < arguments.size())
+		{
+			mGpuTimingPath = arguments[++index];
+			continue;
+		}
+		if ((flag == L"--ibl-intensity" || flag == L"--ibl-rotation") && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
 			size_t consumed = 0;
 			const float number = std::stof(value, &consumed);
-			if (consumed != value.size() || !std::isfinite(number) || number < 0 || number > 100)
+			const float minimum = flag == L"--ibl-rotation" ? -180.0f : 0.0f;
+			const float maximum = flag == L"--ibl-rotation" ? 180.0f : 100.0f;
+			if (consumed != value.size() || !std::isfinite(number) || number < minimum || number > maximum)
 			{
-				throw std::runtime_error("IBL intensity must be 0..100.");
+				throw std::runtime_error("IBL intensity must be 0..100; rotation must be -180..180 degrees.");
 			}
-			mTracing.mEnvironmentIntensity = number;
+			if (flag == L"--ibl-rotation")
+			{
+				mTracing.mEnvironmentRotation = number;
+			}
+			else
+			{
+				mTracing.mEnvironmentIntensity = number;
+			}
 			continue;
 		}
 		if ((flag == L"--light" || flag == L"--ambient" || flag == L"--light-strength") && index + 1 < arguments.size())
@@ -375,7 +389,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl" && flag != L"--conversion-output") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --ibl-rotation <-180..180>, --gpu-timing <file.csv>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -409,6 +423,19 @@ void UsdKitchen::initialize(Renderer& renderer)
 {
 	mRenderer = &renderer;
 	mRaytracer.initialize(renderer);
+	if (!mGpuTimingPath.empty())
+	{
+		if (!mGpuTimingPath.parent_path().empty())
+		{
+			std::filesystem::create_directories(mGpuTimingPath.parent_path());
+		}
+		mGpuTimingLog.open(mGpuTimingPath);
+		if (!mGpuTimingLog)
+		{
+			throw std::runtime_error("Cannot write --gpu-timing output.");
+		}
+		mGpuTimingLog << "gpu_ms\n";
+	}
 	mRaytracer.loadEnvironment(renderer, mEnvironmentPath.empty() ? createPreviewEnvironment() : readRadianceEnvironment(mEnvironmentPath));
 	if (!mEnvironmentPath.empty())
 	{
@@ -734,11 +761,11 @@ void UsdKitchen::drawGui()
 	{
 		int mode = static_cast<int>(mTracing.mRestirMode);
 		int debug = static_cast<int>(mTracing.mRestirDebug);
-		ImGui::Combo("Emissive sampling", &mode, "NEE / MIS\0RIS (8 candidates)\0Temporal reuse\0Temporal + spatial reuse\0");
+		ImGui::Combo("Light sampling", &mode, "NEE / MIS\0RIS (8 candidates)\0Temporal reuse\0Temporal + spatial reuse\0");
 		ImGui::Combo("G-buffer view", &debug, "Lighting\0Normal\0Depth\0Motion\0Reservoir / history\0");
 		mTracing.mRestirMode = static_cast<uint32_t>(mode);
 		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
-		ImGui::TextWrapped("Primary emissive mesh lighting. Other lights and secondary bounces use existing NEE / MIS.");
+		ImGui::TextWrapped("Primary IBL and emissive mesh lighting. Rectangle lights and secondary bounces use existing NEE / MIS.");
 	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{
@@ -829,5 +856,9 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 	if (mHasScene)
 	{
 		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mTracing, mExposure, mMeshletColors, commands, backBuffer);
+		if (mGpuTimingLog.is_open() && mRaytracer.gpuMilliseconds() >= 0)
+		{
+			mGpuTimingLog << mRaytracer.gpuMilliseconds() << '\n';
+		}
 	}
 }

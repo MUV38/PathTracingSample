@@ -176,6 +176,27 @@ float3 directLighting(Surface surface, float3 view)
 	float3 diffuseFill = surface.baseColor * (1.0f - surface.metallic) * (1.0f - materialF0(surface)) / pi;
 	return bsdf * lightColor * lightStrength * attenuation * cosine * visible + diffuseFill * ambient * surface.occlusion;
 }
+bool visibleToEnvironment(Surface surface, float3 direction)
+{
+	RayDesc ray;
+	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
+	ray.Direction = direction;
+	ray.TMin = 0.0f;
+	ray.TMax = 100000.0f;
+	// IBL occlusion is always physical; the Direct lighting shadow toggle is separate.
+	if (rectangleOccludes(ray))
+	{
+		return false;
+	}
+	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
+	query.Proceed();
+	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	{
+		return false;
+	}
+	return true;
+}
 float3 environmentLighting(Surface surface, float3 view, float2 u)
 {
 	uint width, height;
@@ -193,20 +214,7 @@ float3 environmentLighting(Surface surface, float3 view, float2 u)
 	{
 		return 0.0f;
 	}
-	RayDesc ray;
-	ray.Origin = offsetOrigin(surface.position, surface.geometricNormal);
-	ray.Direction = direction;
-	ray.TMin = 0.0f;
-	ray.TMax = 100000.0f;
-	// IBL occlusion is always physical; the Direct lighting shadow toggle is separate.
-	if (rectangleOccludes(ray))
-	{
-		return 0.0f;
-	}
-	RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-	query.TraceRayInline(scene, RAY_FLAG_NONE, 0xff, ray);
-	query.Proceed();
-	if (query.CommittedStatus() != COMMITTED_NOTHING)
+	if (!visibleToEnvironment(surface, direction))
 	{
 		return 0.0f;
 	}
@@ -389,7 +397,18 @@ void RGSMain()
 			{
 				break;
 			}
-			if (environmentMis != 0 && environmentIntensity > 0.0f)
+			bool useRestir = false;
+			if (depth == 0 && restirMode > 0 && meshletColors < 0.5f)
+			{
+				PrimarySurface primary = primarySurfaces[pixel.x + pixel.y * DispatchRaysDimensions().x];
+				useRestir = primary.valid != 0 && primary.triangleIndex == payload.triangleIndex
+					&& length(primary.position - surface.position) < max(0.01f, primary.depth * 0.02f);
+			}
+			if (useRestir)
+			{
+				radiance += throughput * restirLighting(surface, view, pixel);
+			}
+			if (!useRestir && environmentMis != 0 && environmentIntensity > 0.0f)
 			{
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * environmentLighting(surface, view, lightU);
@@ -399,24 +418,10 @@ void RGSMain()
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * rectangleLighting(surface, view, lightU);
 			}
-			bool useRestir = false;
-			if (depth == 0 && restirMode > 0 && meshletColors < 0.5f)
+			if (!useRestir && emissiveMis != 0 && meshLightCount > 0)
 			{
-				PrimarySurface primary = primarySurfaces[pixel.x + pixel.y * DispatchRaysDimensions().x];
-				useRestir = primary.valid != 0 && primary.triangleIndex == payload.triangleIndex
-					&& length(primary.position - surface.position) < max(0.01f, primary.depth * 0.02f);
-			}
-			if (emissiveMis != 0 && meshLightCount > 0)
-			{
-				if (useRestir)
-				{
-					radiance += throughput * restirLighting(surface, view, pixel);
-				}
-				else
-				{
-					float3 lightU = float3(random(state), random(state), random(state));
-					radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
-				}
+				float3 lightU = float3(random(state), random(state), random(state));
+				radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
@@ -442,7 +447,12 @@ void RGSMain()
 				uint width, height;
 				environmentMap.GetDimensions(width, height);
 				float lightPdf = environmentPdf(environmentDistribution, uint2(width, height), nextDirection, environmentRotation);
-				missWeight = powerHeuristic(bsdfPdf, lightPdf);
+				if (useRestir)
+				{
+					lightPdf *= restirEnvironmentSampleRatio();
+				}
+				// ReSTIR estimates the light-side MIS term; keep its BSDF complement.
+				missWeight = environmentReservoirHitWeight(lightPdf, bsdfPdf, delta);
 			}
 			previousPosition = surface.position;
 			previousDelta = delta;
