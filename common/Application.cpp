@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "Sample.h"
+#include <pix3.h>
 
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
@@ -152,11 +153,33 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		}
 		commandLineMode = argumentCount > 1;
 		std::filesystem::path screenshotPath;
+		std::filesystem::path pixCapturePath;
+		bool enablePix = false;
 		uint32_t screenshotCount = 1;
 		uint32_t capturedFrames = 0;
 		std::vector<std::wstring> sampleArguments;
 		for (int index = 1; index < argumentCount; ++index)
 		{
+			if (std::wstring_view(arguments.get()[index]) == L"--pix")
+			{
+				enablePix = true;
+				continue;
+			}
+			if (std::wstring_view(arguments.get()[index]) == L"--pix-capture")
+			{
+				if (!pixCapturePath.empty() || ++index >= argumentCount || arguments.get()[index][0] == L'\0')
+				{
+					throw std::runtime_error("--pix-capture requires one output.wpix path.");
+				}
+				pixCapturePath = std::filesystem::absolute(arguments.get()[index]);
+				if (pixCapturePath.extension() != L".wpix")
+				{
+					throw std::runtime_error("--pix-capture requires a .wpix file.");
+				}
+				std::filesystem::create_directories(pixCapturePath.parent_path());
+				enablePix = true;
+				continue;
+			}
 			if (std::wstring_view(arguments.get()[index]) == L"--screenshot-count")
 			{
 				if (++index >= argumentCount)
@@ -190,6 +213,20 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		if (screenshotCount > 1 && !screenshotMode)
 		{
 			throw std::runtime_error("--screenshot-count requires --screenshot <output.png>.");
+		}
+		if (!pixCapturePath.empty() && screenshotCount > 1)
+		{
+			throw std::runtime_error("--pix-capture supports a single screenshot, not a screenshot burst.");
+		}
+		if (enablePix && !GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+		{
+			// Load before sample configuration: Streamline may invoke graphics APIs there.
+			// Keep the capture layer loaded for the process lifetime; sample graphics
+			// objects can outlive runSample().
+			if (!PIXLoadLatestWinPixGpuCapturerLibrary())
+			{
+				throw std::runtime_error("PIX GPU capture layer could not be loaded. Install PIX for Windows or launch through PIX.");
+			}
 		}
 		if (sample.mConfigure)
 		{
@@ -256,6 +293,18 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 				renderer.setMouseMotion(std::exchange(state.mMouseMotion, MouseMotion{0.0f, 0.0f, state.mRawMouseRegistered}));
 				const bool captureFrame = screenshotMode && renderedFrames >= 2
 					&& (capturedFrames > 0 || !sample.mReadyForScreenshot || sample.mReadyForScreenshot());
+				const bool capturePixFrame = !pixCapturePath.empty() && renderedFrames >= 2
+					&& (!sample.mReadyForScreenshot || sample.mReadyForScreenshot());
+				if (capturePixFrame)
+				{
+					renderer.waitForGpu();
+					PIXCaptureParameters parameters{};
+					parameters.GpuCaptureParameters.FileName = pixCapturePath.c_str();
+					if (FAILED(PIXBeginCapture(PIX_CAPTURE_GPU, &parameters)))
+					{
+						throw std::runtime_error("PIXBeginCapture failed.");
+					}
+				}
 				if (captureFrame || state.mScreenshotRequested)
 				{
 					auto path = captureFrame ? screenshotPath : std::filesystem::path{};
@@ -270,6 +319,20 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 				}
 				renderer.render();
 				++renderedFrames;
+				if (capturePixFrame)
+				{
+					renderer.waitForGpu();
+					if (FAILED(PIXEndCapture(FALSE)) || !std::filesystem::is_regular_file(pixCapturePath)
+						|| std::filesystem::file_size(pixCapturePath) == 0)
+					{
+						throw std::runtime_error("PIXEndCapture failed to save a GPU capture.");
+					}
+					if (!captureFrame)
+					{
+						DestroyWindow(window);
+						return 0;
+					}
+				}
 				if (captureFrame)
 				{
 					const int result = renderer.screenshotSucceeded() ? 0 : 1;

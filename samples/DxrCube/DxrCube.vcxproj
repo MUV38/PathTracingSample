@@ -15,7 +15,7 @@
       <Project>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</Project>
     </ProjectReference>
     <CustomBuild Include="Cube.hlsl">
-      <Command>"$(DxcExecutable)" -T lib_6_3 -HV 2021 -WX -Fo "$(OutDir)Cube.dxil" "%(FullPath)"</Command>
+      <Command>"$(DxcExecutable)" -T lib_6_3 -HV 2021 -WX -Zi -Qembed_debug -Fo "$(OutDir)Cube.dxil" "%(FullPath)"</Command>
       <Outputs>$(OutDir)Cube.dxil</Outputs>
       <Message>Compiling DXR shader library: Cube.hlsl</Message>
     </CustomBuild>

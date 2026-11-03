@@ -1,4 +1,5 @@
 #include "RayReconstruction.h"
+#include <pix3.h>
 #include "Sample.h"
 #include <filesystem>
 #include <cstring>
@@ -196,12 +197,15 @@ void RayReconstruction::resize(ID3D12Device* device, UINT width, UINT height)
 	desc.DepthOrArraySize = desc.MipLevels = 1;
 	desc.SampleDesc.Count = 1;
 	desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+	constexpr const wchar_t* names[] = {L"RR noisy HDR", L"RR linear depth", L"RR motion vectors",
+		L"RR normal / roughness", L"RR diffuse albedo", L"RR specular albedo", L"RR specular hit distance", L"RR output HDR"};
 	for (size_t index = 0; index < mResources.size(); ++index)
 	{
 		desc.Format = format(index);
 		mResources[index].Reset();
 		checkHr(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
 			D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&mResources[index])), "Create RR guide texture");
+		mResources[index]->SetName(names[index]);
 	}
 	mWidth = width;
 	mHeight = height;
@@ -210,6 +214,7 @@ void RayReconstruction::resize(ID3D12Device* device, UINT width, UINT height)
 void RayReconstruction::evaluate(ID3D12GraphicsCommandList* commands, const Camera& camera, UINT left,
 	DirectX::XMFLOAT2 jitter, const DirectX::XMFLOAT4X4& previousViewProjection, bool reset, uint32_t frame)
 {
+	PIXScopedEvent(commands, PIX_COLOR(110, 200, 80), "DLSS Ray Reconstruction");
 	const sl::ViewportHandle viewport(0);
 	if (mLeft != left && mAllocated)
 	{

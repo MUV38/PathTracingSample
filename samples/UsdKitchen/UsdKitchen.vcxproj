@@ -36,7 +36,7 @@
 		<ClInclude Include="RectangleLight.hlsli" />
 		<ProjectReference Include="..\..\common\SampleFramework.vcxproj"><Project>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</Project></ProjectReference>
 		<CustomBuild Include="Scene.hlsl">
-			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Fo "$(OutDir)Scene.dxil" "%(FullPath)"</Command>
+			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Zi -Qembed_debug -Fo "$(OutDir)Scene.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)Scene.dxil</Outputs>
 			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)RayReconstruction.hlsli;$(ProjectDir)RestirDI.hlsli;$(ProjectDir)RestirPasses.hlsli;$(ProjectDir)RussianRoulette.hlsli;$(ProjectDir)GgxEnergy.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 			<Message>Compiling converted-mesh DXR shaders</Message>

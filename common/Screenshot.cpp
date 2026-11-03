@@ -1,4 +1,5 @@
 #include "Screenshot.h"
+#include <pix3.h>
 
 #include <wincodec.h>
 
@@ -36,6 +37,7 @@ struct ComApartment
 
 void Screenshot::record(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
+	PIXScopedEvent(commandList, PIX_COLOR(200, 140, 200), "Screenshot / GPU readback");
 	const D3D12_RESOURCE_DESC textureDescription = backBuffer->GetDesc();
 	if (textureDescription.Format != DXGI_FORMAT_R8G8B8A8_UNORM || textureDescription.SampleDesc.Count != 1)
 	{
@@ -80,6 +82,7 @@ void Screenshot::record(ID3D12Device* device, ID3D12GraphicsCommandList* command
 
 void Screenshot::savePng(const std::filesystem::path& path) const
 {
+	PIXScopedEvent(PIX_COLOR(200, 140, 200), "Screenshot / PNG encoding");
 	if (!mReadback)
 	{
 		throw std::runtime_error("No screenshot frame has been recorded.");

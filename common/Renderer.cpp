@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include "Screenshot.h"
 #include "Sample.h"
+#include <pix3.h>
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx12.h>
@@ -67,6 +68,7 @@ Renderer::~Renderer()
 
 void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sample)
 {
+	PIXScopedEvent(PIX_COLOR(80, 160, 240), "Initialize DirectX 12 / ImGui");
 	mSample = &sample;
 	mWindow = window;
 	UINT factoryFlags = 0;
@@ -133,6 +135,7 @@ void Renderer::initialize(HWND window, UINT width, UINT height, const Sample& sa
 	D3D12_COMMAND_QUEUE_DESC queueDescription{};
 	queueDescription.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	check(mDevice->CreateCommandQueue(&queueDescription, IID_PPV_ARGS(&mQueue)), "CreateCommandQueue");
+	mQueue->SetName(L"Graphics queue");
 	check(mDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&mFence)), "CreateFence");
 	mFenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 	if (!mFenceEvent)
@@ -251,6 +254,7 @@ void Renderer::freeGuiDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle)
 
 void Renderer::drawGui()
 {
+	PIXScopedEvent(PIX_COLOR(80, 200, 120), "Update / build ImGui");
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
@@ -314,6 +318,7 @@ void Renderer::createRenderTargets()
 
 void Renderer::waitForGpu()
 {
+	PIXScopedEvent(PIX_COLOR(220, 120, 80), "Wait for GPU fence");
 	if (!mQueue || !mFence || !mFenceEvent)
 	{
 		return;
@@ -347,6 +352,7 @@ void Renderer::resize(UINT width, UINT height)
 
 void Renderer::render()
 {
+	PIXScopedEvent(PIX_COLOR(70, 130, 220), "Frame / CPU");
 	drawGui();
 	const auto screenshotPath = std::exchange(mScreenshotPath, {});
 	Screenshot screenshot;
@@ -355,45 +361,61 @@ void Renderer::render()
 	check(mAllocator->Reset(), "Reset command allocator");
 	check(mCommandList->Reset(mAllocator.Get(), nullptr), "Reset command list");
 
-	D3D12_RESOURCE_BARRIER barrier{};
-	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	barrier.Transition.pResource = mRenderTargets[index].Get();
-	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	mCommandList->ResourceBarrier(1, &barrier);
-
-	auto rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
-	rtv.ptr += static_cast<SIZE_T>(index) * mRtvStride;
-	mCommandList->ClearRenderTargetView(rtv, mClearColor.data(), 0, nullptr);
-	if (mSample->mRender)
 	{
-		mSample->mRender(*this, mCommandList.Get(), mRenderTargets[index].Get());
-	}
-	mCommandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-	ID3D12DescriptorHeap* heaps[] = {mGuiSrvHeap.Get()};
-	mCommandList->SetDescriptorHeaps(1, heaps);
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
-	if (!screenshotPath.empty())
-	{
-		try
-		{
-			screenshot.record(mDevice.Get(), mCommandList.Get(), mRenderTargets[index].Get());
-			screenshotRecorded = true;
-		}
-		catch (const std::exception& error)
-		{
-			mScreenshotStatus = std::string("Screenshot failed: ") + error.what();
-		}
-	}
+		PIXScopedEvent(mCommandList.Get(), PIX_COLOR(70, 130, 220), "Frame / GPU");
+		D3D12_RESOURCE_BARRIER barrier{};
+		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrier.Transition.pResource = mRenderTargets[index].Get();
+		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		mCommandList->ResourceBarrier(1, &barrier);
 
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-	mCommandList->ResourceBarrier(1, &barrier);
+		auto rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
+		rtv.ptr += static_cast<SIZE_T>(index) * mRtvStride;
+		{
+			PIXScopedEvent(mCommandList.Get(), PIX_COLOR(100, 100, 130), "Clear back buffer");
+			mCommandList->ClearRenderTargetView(rtv, mClearColor.data(), 0, nullptr);
+		}
+		if (mSample->mRender)
+		{
+			mSample->mRender(*this, mCommandList.Get(), mRenderTargets[index].Get());
+		}
+		{
+			PIXScopedEvent(mCommandList.Get(), PIX_COLOR(80, 200, 120), "ImGui");
+			mCommandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+			ID3D12DescriptorHeap* heaps[] = {mGuiSrvHeap.Get()};
+			mCommandList->SetDescriptorHeaps(1, heaps);
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
+		}
+		if (!screenshotPath.empty())
+		{
+			try
+			{
+				screenshot.record(mDevice.Get(), mCommandList.Get(), mRenderTargets[index].Get());
+				screenshotRecorded = true;
+			}
+			catch (const std::exception& error)
+			{
+				mScreenshotStatus = std::string("Screenshot failed: ") + error.what();
+			}
+		}
+
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+		mCommandList->ResourceBarrier(1, &barrier);
+	}
 	check(mCommandList->Close(), "Close command list");
 	ID3D12CommandList* lists[] = {mCommandList.Get()};
-	mQueue->ExecuteCommandLists(1, lists);
-	const HRESULT presentResult = mSwapChain->Present(1, 0);
+	{
+		PIXScopedEvent(PIX_COLOR(100, 140, 220), "Submit command list");
+		mQueue->ExecuteCommandLists(1, lists);
+	}
+	HRESULT presentResult;
+	{
+		PIXScopedEvent(PIX_COLOR(220, 180, 80), "Present / VSync");
+		presentResult = mSwapChain->Present(1, 0);
+	}
 	// One frame in flight keeps allocator/resource lifetime explicit at this first milestone.
 	waitForGpu();
 	check(presentResult, "Present");
