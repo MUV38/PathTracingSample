@@ -23,6 +23,30 @@ struct LightReservoir
 	float proposalPdf;
 };
 static const uint environmentLightIndex = 0xffffffffu;
+static const uint rectangleLightIndex = 0xfffffffeu;
+uint reservoirLightTypeCount(bool environmentEnabled, bool meshEnabled, bool rectangleEnabled)
+{
+	return uint(environmentEnabled) + uint(meshEnabled) + uint(rectangleEnabled);
+}
+float3 evaluateRectangleReservoirSample(Surface surface, float3 view, RectangleLight light, float2 uv)
+{
+	float3 lightPoint = sampleRectanglePoint(light, uv);
+	float3 delta = lightPoint - surface.position;
+	float distanceSquared = dot(delta, delta);
+	if (distanceSquared <= 1e-12f)
+	{
+		return 0;
+	}
+	float3 direction = delta * rsqrt(distanceSquared);
+	float noL = dot(surface.normal, direction);
+	float lightCosine = dot(rectangleNormal(light), -direction);
+	if (light.enabled == 0 || noL <= 0 || lightCosine <= 0 || dot(surface.geometricNormal, direction) <= 0)
+	{
+		return 0;
+	}
+	float unusedPdf;
+	return evaluateBsdf(surface, view, direction, unusedPdf) * noL * surface.occlusion * light.radiance * lightCosine / distanceSquared;
+}
 float2 encodeEnvironmentSample(float3 direction)
 {
 	return float2(atan2(direction.z, direction.x), direction.y);

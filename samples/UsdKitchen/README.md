@@ -172,11 +172,11 @@ Metallic / Roughnessなどの変更だけでは光源表を再構築しません
 
 ## 間接照明とIBL
 
-一次ヒットの発光メッシュ照明とIBLには、オプションでReSTIR DIを使用できます。発光三角形0でもIBLだけで動作します。既定は従来のNEE / MISです。
+一次ヒットの発光メッシュ照明・IBL・矩形光源には、オプションでReSTIR DIを使用できます。発光三角形0でもIBLだけ、矩形だけで動作します。既定は従来のNEE / MISです。
 ImGuiの `ReSTIR DI`、または `--restir off|ris|temporal|spatial` で、8候補RIS・時間再利用・空間再利用を段階的に比較できます。
 G-bufferの法線・深度・モーション・Reservoir履歴は `--restir spatial --restir-debug normal|depth|motion|reservoir` で表示します。
 G-buffer viewはNEE / MIS選択中や発光三角形0でも使用できます。例えば `--restir-debug normal` だけで法線を表示します。
-矩形ライト・二次ヒット以降は既存の方式です。`--no-ibl-mis` / `--no-emissive-mis` は対応する光源をReSTIRの候補からも除きます。
+二次ヒット以降は既存の方式です。`--no-ibl-mis` / `--no-emissive-mis` / `--no-rect-mis` は対応する光源をReSTIRの候補からも除きます。矩形は従来どおり1灯で、直接見える光源と完全鏡への映り込みを維持します。
 `--ibl-rotation <度>` で環境を回転し、`--gpu-timing <出力.csv>` でGPUの照明パス時間を保存できます。[仕組み・検証・メモリ使用量と制限](../../tests/RestirDI.md) を参照してください。
 
 Russian Rouletteは既定で有効です。3回の反射後からスループットのRGB最大成分に応じて継続を抽選し、生存した経路を確率の逆数で補正します。

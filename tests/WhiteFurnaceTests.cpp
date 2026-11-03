@@ -498,10 +498,11 @@ void checkRestir(const std::filesystem::path& directory, bool warp)
 	}
 	std::cout << "ReSTIR reservoir checks passed: " << tests.size() << " cases.\n";
 }
-void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
+void checkRestirLighting(const std::filesystem::path& directory, bool warp, bool includeRectangle)
 {
-	for (bool sparse : {false, true})
+	for (bool variant : {false, true})
 	{
+		const bool sparse = variant && !includeRectangle;
 		std::vector<Test> tests;
 		for (bool mixed : {false, true})
 		{
@@ -512,6 +513,12 @@ void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
 					for (uint32_t mode = 0; mode < 4; ++mode)
 					{
 						CaseData data{{0.2f,0.5f,0.8f}, 0, 0.6f, 0, noV, 2048u | (mode << 9u) | (mixed ? 4096u : 0u)};
+						if (includeRectangle)
+						{
+							// Rectangle variants cover the environment off / on;
+							// environment-only variants cover normal / sparse CDFs.
+							data.mFlags |= 8192u | (variant ? 0u : 16384u);
+						}
 						if (material == 1)
 						{
 							data.mSpecular = 1;
@@ -537,7 +544,9 @@ void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
 			}
 		}
 		const auto results = integrate(tests, warp, sparse);
-		std::ofstream csv(directory / (sparse ? L"restir-environment-sparse.csv" : L"restir-environment.csv"));
+		const auto filename = includeRectangle ? (variant ? L"restir-rectangle-environment.csv" : L"restir-rectangle.csv")
+			: (sparse ? L"restir-environment-sparse.csv" : L"restir-environment.csv");
+		std::ofstream csv(directory / filename);
 		csv << "case,mode,mixed,channel,mean,standard_error,baseline,variance,pass\n" << std::setprecision(9);
 		size_t failures = 0;
 		const double formFactor = 4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25));
@@ -548,6 +557,8 @@ void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
 			const auto& baseline = results[index - index % 4];
 			const unsigned material = static_cast<unsigned>((index / 4) % 5);
 			const bool mixed = (data.mFlags & 4096u) != 0;
+			const double environment = (data.mFlags & 16384u) == 0 ? 1.0 : 0.0;
+			const double finiteLights = (mixed ? 1.0 : 0.0) + (includeRectangle ? 1.0 : 0.0);
 			for (size_t axis = 0; axis < 3; ++axis)
 			{
 				const double error = std::sqrt(result.mVariance[axis] / sampleCount);
@@ -556,27 +567,27 @@ void checkRestirEnvironment(const std::filesystem::path& directory, bool warp)
 					&& result.mMean[axis] >= 0 && std::abs(result.mMean[axis] - baseline.mMean[axis]) <= 0.002 + 6 * combinedError;
 				if (material == 0 || material == 3)
 				{
-					const double expected = data.mBaseColor[axis] * (1 + (mixed ? formFactor : 0));
+					const double expected = data.mBaseColor[axis] * (environment + finiteLights * formFactor);
 					pass &= std::abs(result.mMean[axis] - expected) <= 0.0005 + 6 * error;
 				}
 				if (material == 4)
 				{
-					pass &= std::abs(result.mMean[axis] - (mixed && data.mNoV == 1 ? 2.0 : 1.0)) < 0.0005;
+					pass &= std::abs(result.mMean[axis] - (environment + (data.mNoV == 1 ? finiteLights : 0.0))) < 0.0005;
 				}
 				csv << index / 4 << ',' << index % 4 << ',' << mixed << ',' << axis << ',' << result.mMean[axis] << ',' << error << ',' << baseline.mMean[axis] << ',' << result.mVariance[axis] << ',' << pass << '\n';
 				if (!pass)
 				{
 					++failures;
-					std::cerr << "IBL reservoir FAIL: sparse=" << sparse << " case=" << index << " channel=" << axis << '\n';
+					std::cerr << "Light reservoir FAIL: rectangle=" << includeRectangle << " variant=" << variant << " case=" << index << " channel=" << axis << '\n';
 				}
 			}
 		}
 		csv.close();
 		if (!csv || failures)
 		{
-			throw std::runtime_error("IBL ReSTIR checks failed; inspect restir-environment CSV files.");
+			throw std::runtime_error("Light ReSTIR checks failed; inspect restir-environment / restir-rectangle CSV files.");
 		}
-		std::cout << "IBL ReSTIR checks passed: " << tests.size() << " cases, sparse=" << sparse << ".\n";
+		std::cout << "Light ReSTIR checks passed: " << tests.size() << " cases, rectangle=" << includeRectangle << ", variant=" << variant << ".\n";
 	}
 }
 void writeRectangleFixtures(const std::filesystem::path& directory)
@@ -723,7 +734,8 @@ int wmain(int count, wchar_t** arguments)
 		std::cout << "White furnace passed: " << tests.size() << " cases, " << sampleCount << " samples/case. CSV: " << (directory / L"furnace.csv").string() << '\n';
 		checkRussianRoulette(directory, count == 3);
 		checkRestir(directory, count == 3);
-		checkRestirEnvironment(directory, count == 3);
+		checkRestirLighting(directory, count == 3, false);
+		checkRestirLighting(directory, count == 3, true);
 		return 0;
 	}
 	catch (const std::exception& error)

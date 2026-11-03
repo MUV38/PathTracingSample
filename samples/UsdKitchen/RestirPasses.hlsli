@@ -13,11 +13,16 @@ Surface primaryBsdf(PrimarySurface primary)
 	surface.singleScatterOnly = multipleScattering == 0;
 	return surface;
 }
+uint restirLightTypeCount()
+{
+	return reservoirLightTypeCount(environmentMis != 0 && environmentIntensity > 0,
+		meshLightCount > 0 && emissiveMis != 0, rectangle.enabled != 0 && rectangle.mis != 0);
+}
 float restirEnvironmentSampleRatio()
 {
 	// Eight initial candidates per frame; account for the light-type mixture
 	// and the number of BSDF samples when defining the complementary MIS terms.
-	float candidates = meshLightCount > 0 && emissiveMis != 0 ? 4.0f : 8.0f;
+	float candidates = 8.0f / float(max(restirLightTypeCount(), 1u));
 	return candidates / float(samplesPerFrame);
 }
 float3 reservoirIntegrand(Surface surface, float3 view, LightReservoir lightSample)
@@ -27,16 +32,22 @@ float3 reservoirIntegrand(Surface surface, float3 view, LightReservoir lightSamp
 		float3 direction = decodeEnvironmentSample(lightSample.uv);
 		return evaluateEnvironmentReservoirSample(surface, view, direction, sampleEnvironment(direction), lightSample.proposalPdf * restirEnvironmentSampleRatio());
 	}
+	if (lightSample.lightIndex == rectangleLightIndex)
+	{
+		return evaluateRectangleReservoirSample(surface, view, rectangle, lightSample.uv);
+	}
 	return evaluateReservoirSample(surface, view, meshLights[lightSample.lightIndex], lightSample.uv);
 }
 float reservoirProposalPdf(LightReservoir lightSample)
 {
-	bool meshEnabled = meshLightCount > 0 && emissiveMis != 0;
-	bool environmentEnabled = environmentMis != 0 && environmentIntensity > 0;
-	float typeProbability = meshEnabled && environmentEnabled ? 0.5f : 1.0f;
+	float typeProbability = 1.0f / float(max(restirLightTypeCount(), 1u));
 	if (lightSample.lightIndex == environmentLightIndex)
 	{
 		return typeProbability * lightSample.proposalPdf;
+	}
+	if (lightSample.lightIndex == rectangleLightIndex)
+	{
+		return typeProbability / (rectangle.width * rectangle.height);
 	}
 	return typeProbability * meshLights[lightSample.lightIndex].areaDensity;
 }
@@ -108,15 +119,16 @@ void prepareRestir(uint2 pixel, uint state)
 				float3 view = -ray.Direction;
 				// Independent of path sampling and accumulation resets while moving.
 				state = address ^ ((restirFrame + 1u) * 0xa511e9b3u);
-				bool meshEnabled = meshLightCount > 0 && emissiveMis != 0;
 				bool environmentEnabled = environmentMis != 0 && environmentIntensity > 0;
-				if (restirMode > 0 && (meshEnabled || environmentEnabled) && maxBounces > 0 && meshletColors < 0.5f)
+				bool rectangleEnabled = rectangle.enabled != 0 && rectangle.mis != 0;
+				uint typeCount = restirLightTypeCount();
+				if (restirMode > 0 && typeCount > 0 && maxBounces > 0 && meshletColors < 0.5f)
 				{
 					for (uint i = 0; i < 8; ++i)
 					{
 						LightReservoir candidate = (LightReservoir)0;
-						bool selectEnvironment = environmentEnabled && (!meshEnabled || random(state) < 0.5f);
-						if (selectEnvironment)
+						uint type = min(uint(random(state) * float(typeCount)), typeCount - 1u);
+						if (environmentEnabled && type == 0)
 						{
 							uint width, height;
 							environmentMap.GetDimensions(width, height);
@@ -127,7 +139,14 @@ void prepareRestir(uint2 pixel, uint state)
 						}
 						else
 						{
-							candidate.lightIndex = sampleMeshLightIndex(meshLights, meshLightCount, random(state));
+							if (rectangleEnabled && type == typeCount - 1u)
+							{
+								candidate.lightIndex = rectangleLightIndex;
+							}
+							else
+							{
+								candidate.lightIndex = sampleMeshLightIndex(meshLights, meshLightCount, random(state));
+							}
 							candidate.uv = float2(random(state), random(state));
 						}
 						float target = reservoirTarget(surface, view, candidate);
@@ -195,6 +214,14 @@ float3 restirLighting(Surface surface, float3 view, uint2 pixel)
 	{
 		return maxComponent(value) > 0 && visibleToEnvironment(surface, decodeEnvironmentSample(reservoir.uv)) ? value * reservoir.weight : 0;
 	}
-	float3 lightPoint = sampleMeshLightPoint(meshLights[reservoir.lightIndex], reservoir.uv);
+	float3 lightPoint;
+	if (reservoir.lightIndex == rectangleLightIndex)
+	{
+		lightPoint = sampleRectanglePoint(rectangle, reservoir.uv);
+	}
+	else
+	{
+		lightPoint = sampleMeshLightPoint(meshLights[reservoir.lightIndex], reservoir.uv);
+	}
 	return maxComponent(value) > 0 && visibleToPoint(surface, lightPoint) ? value * reservoir.weight : 0;
 }

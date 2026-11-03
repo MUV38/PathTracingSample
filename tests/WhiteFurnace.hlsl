@@ -14,6 +14,8 @@ struct TestCase
 	float specular;
 	float noV;
 	uint flags; // 1: reference, 2: MIS, 4: rectangle, 8: mesh, 16: NDF, 32: single scatter, 64: RR chain, 128: RR off.
+	// 256: mesh reservoir, 512/1024: reservoir mode, 2048: mixed-light reservoir,
+	// 4096: include mesh, 8192: include rectangle, 16384: exclude environment.
 };
 struct Result
 {
@@ -49,11 +51,15 @@ float random(inout uint state)
 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 	return float(((word >> 22u) ^ word) >> 8u) / 16777216.0f;
 }
-float3 testEnvironmentReservoirValue(Surface surface, float3 view, LightReservoir reservoir, float sampleRatio)
+float3 testEnvironmentReservoirValue(Surface surface, float3 view, LightReservoir reservoir, float sampleRatio, RectangleLight rectangle)
 {
 	if (reservoir.lightIndex == environmentLightIndex)
 	{
 		return evaluateEnvironmentReservoirSample(surface, view, decodeEnvironmentSample(reservoir.uv), 1.0f, reservoir.proposalPdf * sampleRatio);
+	}
+	if (reservoir.lightIndex == rectangleLightIndex)
+	{
+		return evaluateRectangleReservoirSample(surface, view, rectangle, reservoir.uv);
 	}
 	return evaluateReservoirSample(surface, view, meshLights[reservoir.lightIndex], reservoir.uv);
 }
@@ -105,7 +111,11 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 		{
 			uint mode = (input.flags >> 9u) & 3u;
 			bool mixed = (input.flags & 4096u) != 0;
-			float sampleRatio = (mode == 0 ? 1.0f : 8.0f) * (mixed ? 0.5f : 1.0f);
+			bool rectangleEnabled = (input.flags & 8192u) != 0;
+			bool environmentEnabled = (input.flags & 16384u) == 0;
+			uint typeCount = reservoirLightTypeCount(environmentEnabled, mixed, rectangleEnabled);
+			float typeProbability = 1.0f / float(typeCount);
+			float sampleRatio = (mode == 0 ? 1.0f : 8.0f) * typeProbability;
 			uint sources = mode >= 2 ? (mode == 3 ? 5u : 2u) : 1u;
 			LightReservoir combined = (LightReservoir)0;
 			for (uint sourceIndex = 0; sourceIndex < sources; ++sourceIndex)
@@ -120,7 +130,8 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 				{
 					LightReservoir candidate = (LightReservoir)0;
 					float3 value;
-					if (!mixed || random(state) < 0.5f)
+					uint type = min(uint(random(state) * float(typeCount)), typeCount - 1u);
+					if (environmentEnabled && type == 0)
 					{
 						candidate.lightIndex = environmentLightIndex;
 						float2 lightU = float2(random(state), random(state));
@@ -130,23 +141,31 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 					}
 					else
 					{
-						candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+						if (rectangleEnabled && type == typeCount - 1u)
+						{
+							candidate.lightIndex = rectangleLightIndex;
+							candidate.proposalPdf = 1.0f / (rectangle.width * rectangle.height);
+						}
+						else
+						{
+							candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+							candidate.proposalPdf = meshLights[candidate.lightIndex].areaDensity;
+						}
 						candidate.uv = float2(random(state), random(state));
-						candidate.proposalPdf = meshLights[candidate.lightIndex].areaDensity;
-						value = evaluateReservoirSample(sourceSurface, view, meshLights[candidate.lightIndex], candidate.uv);
+						value = testEnvironmentReservoirValue(sourceSurface, view, candidate, sampleRatio, rectangle);
 					}
-					float pdf = candidate.proposalPdf * (mixed ? 0.5f : 1.0f);
+					float pdf = candidate.proposalPdf * typeProbability;
 					float target = lightSampleTarget(value, pdf);
 					streamReservoir(reservoir, candidate, target, target / pdf, 1, random(state));
 				}
 				finishReservoir(reservoir);
-				float3 value = testEnvironmentReservoirValue(surface, view, reservoir, sampleRatio);
-				float target = lightSampleTarget(value, reservoir.proposalPdf * (mixed ? 0.5f : 1.0f));
+				float3 value = testEnvironmentReservoirValue(surface, view, reservoir, sampleRatio, rectangle);
+				float target = lightSampleTarget(value, reservoir.proposalPdf * typeProbability);
 				float count = min(reservoir.count, sourceIndex == 0 ? 8.0f : 4.0f);
 				streamReservoir(combined, reservoir, target, target * reservoir.weight * count, count, random(state));
 			}
 			finishReservoir(combined);
-			float3 value = testEnvironmentReservoirValue(surface, view, combined, sampleRatio);
+			float3 value = testEnvironmentReservoirValue(surface, view, combined, sampleRatio, rectangle);
 			value *= combined.weight;
 			float3 direction, weight;
 			float3 u = float3(random(state), random(state), random(state));
@@ -156,11 +175,14 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 				float pdf = environmentPdf(environmentDistribution, uint2(16,8), direction, 0.7f);
 				float bsdfPdf;
 				evaluateBsdf(surface, view, direction, bsdfPdf);
-				value += weight * environmentReservoirHitWeight(pdf * sampleRatio, bsdfPdf, delta);
-				float distance;
-				if (mixed && delta && intersectRectangle(rectangle, 0.0f, direction, 0.0001f, 100000, distance))
+				if (environmentEnabled)
 				{
-					value += weight;
+					value += weight * environmentReservoirHitWeight(pdf * sampleRatio, bsdfPdf, delta);
+				}
+				float distance;
+				if (delta && intersectRectangle(rectangle, 0.0f, direction, 0.0001f, 100000, distance))
+				{
+					value += weight * (float(mixed) + float(rectangleEnabled));
 				}
 			}
 			if (any(!isfinite(value)) || any(value < 0) || !isfinite(combined.weight))

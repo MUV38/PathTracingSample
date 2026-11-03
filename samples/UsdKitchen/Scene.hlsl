@@ -347,8 +347,15 @@ void RGSMain()
 				float weight = 1.0f;
 				if (depth > 0 && !previousDelta && rectangle.mis != 0)
 				{
-					float pdf = rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
-					weight = powerHeuristic(previousBsdfPdf, pdf);
+					if (previousRestir)
+					{
+						weight = 0;
+					}
+					else
+					{
+						float pdf = rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
+						weight = powerHeuristic(previousBsdfPdf, pdf);
+					}
 				}
 				radiance += throughput * rectangleEmission(rectangle, ray.Direction) * weight;
 				break;
@@ -413,7 +420,7 @@ void RGSMain()
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * environmentLighting(surface, view, lightU);
 			}
-			if (rectangle.enabled != 0 && rectangle.mis != 0)
+			if (!useRestir && rectangle.enabled != 0 && rectangle.mis != 0)
 			{
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * rectangleLighting(surface, view, lightU);
