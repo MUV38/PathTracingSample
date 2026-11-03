@@ -125,15 +125,41 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 	for (size_t index = 0; index < arguments.size(); ++index)
 	{
 		const auto& flag = arguments[index];
-		if (flag == L"--rect-light" || flag == L"--no-rect-mis")
+		if (flag == L"--add-rect-light")
+		{
+			if (mLighting.mRectangleCount == Lighting::maximumRectangles)
+			{
+				throw std::runtime_error("At most 32 rectangle lights are supported.");
+			}
+			mSelectedRectangle = static_cast<int>(mLighting.mRectangleCount++);
+			mLighting.mRectangles[mSelectedRectangle].mEnabled = true;
+			continue;
+		}
+		if (flag == L"--rect-index" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const auto selected = std::stoul(value, &consumed);
+			if (consumed != value.size() || selected >= mLighting.mRectangleCount)
+			{
+				throw std::runtime_error("--rect-index must name an existing zero-based rectangle slot.");
+			}
+			mSelectedRectangle = static_cast<int>(selected);
+			continue;
+		}
+		if (flag == L"--rect-light" || flag == L"--no-rect-light" || flag == L"--no-rect-mis")
 		{
 			if (flag == L"--rect-light")
 			{
-				mLighting.mRectangle.mEnabled = true;
+				mLighting.mRectangles[mSelectedRectangle].mEnabled = true;
+			}
+			else if (flag == L"--no-rect-light")
+			{
+				mLighting.mRectangles[mSelectedRectangle].mEnabled = false;
 			}
 			else
 			{
-				mLighting.mRectangle.mMis = false;
+				mLighting.mRectangleMis = false;
 			}
 			continue;
 		}
@@ -172,7 +198,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 					throw std::runtime_error("Rectangle light parameter is outside its valid range.");
 				}
 			}
-			auto& rectangle = mLighting.mRectangle;
+			auto& rectangle = mLighting.mRectangles[mSelectedRectangle];
 			if (flag == L"--rect-position")
 			{
 				rectangle.mPosition = {values[0], values[1], values[2]};
@@ -335,6 +361,17 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mGpuTimingPath = arguments[++index];
 			continue;
 		}
+		if (flag == L"--gpu-budget-ms" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			mScreenshotGpuBudget = std::stod(value, &consumed);
+			if (consumed != value.size() || !std::isfinite(mScreenshotGpuBudget) || mScreenshotGpuBudget < 100 || mScreenshotGpuBudget > 5000)
+			{
+				throw std::runtime_error("--gpu-budget-ms must be 100..5000 milliseconds.");
+			}
+			continue;
+		}
 		if ((flag == L"--ibl-intensity" || flag == L"--ibl-rotation") && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -389,7 +426,7 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		}
 		if ((flag != L"--model" && flag != L"--usd" && flag != L"--converter" && flag != L"--ibl" && flag != L"--conversion-output") || index + 1 >= arguments.size())
 		{
-			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --ibl-rotation <-180..180>, --gpu-timing <file.csv>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
+			throw std::runtime_error("UsdKitchen options: --model / --usd <file>, --converter <exe>, --conversion-output <file.ptscene>, --ibl <file.hdr>, --bounces <0..8>, --spp <1..16>, --samples <1..65536>, --ibl-intensity <0..100>, --ibl-rotation <-180..180>, --gpu-timing <file.csv>, --gpu-budget-ms <100..5000>, --no-ibl-mis, --no-emissive-mis, --no-multiscattering, --no-russian-roulette, --restir <off|ris|temporal|spatial>, --restir-debug <off|normal|depth|motion|reservoir>, --rect-light / --no-rect-light, --add-rect-light, --rect-index <slot>, --rect-position x y z, --rect-size width height, --rect-orientation azimuth elevation, --rect-color r g b, --rect-radiance <0..10000>, --no-rect-mis, --metallic / --roughness / --specular <0..1>, --meshlet-colors, --light <directional|point>, --no-shadows, --ambient <0..2>, --light-strength <0..200>.");
 		}
 		const std::filesystem::path path = arguments[++index];
 		if (flag == L"--model")
@@ -434,7 +471,7 @@ void UsdKitchen::initialize(Renderer& renderer)
 		{
 			throw std::runtime_error("Cannot write --gpu-timing output.");
 		}
-		mGpuTimingLog << "gpu_ms\n";
+		mGpuTimingLog << "gpu_ms,samples\n";
 	}
 	mRaytracer.loadEnvironment(renderer, mEnvironmentPath.empty() ? createPreviewEnvironment() : readRadianceEnvironment(mEnvironmentPath));
 	if (!mEnvironmentPath.empty())
@@ -743,11 +780,40 @@ void UsdKitchen::drawGui()
 			}
 		}
 	}
-	if (ImGui::CollapsingHeader("Rectangle light", mLighting.mRectangle.mEnabled ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+	if (ImGui::CollapsingHeader("Rectangle lights", mLighting.mRectangles[mSelectedRectangle].mEnabled ? ImGuiTreeNodeFlags_DefaultOpen : 0))
 	{
-		auto& rectangle = mLighting.mRectangle;
+		ImGui::Text("Rectangles: %zu / %zu", mLighting.mRectangleCount, Lighting::maximumRectangles);
+		ImGui::BeginDisabled(mLighting.mRectangleCount == Lighting::maximumRectangles);
+		if (ImGui::Button("Add rectangle"))
+		{
+			mSelectedRectangle = static_cast<int>(mLighting.mRectangleCount++);
+			mLighting.mRectangles[mSelectedRectangle] = {};
+			mLighting.mRectangles[mSelectedRectangle].mEnabled = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Duplicate rectangle"))
+		{
+			auto copy = mLighting.mRectangles[mSelectedRectangle];
+			copy.mPosition.x += copy.mWidth;
+			mSelectedRectangle = static_cast<int>(mLighting.mRectangleCount++);
+			mLighting.mRectangles[mSelectedRectangle] = copy;
+		}
+		ImGui::EndDisabled();
+		ImGui::BeginDisabled(mLighting.mRectangleCount <= 1);
+		if (ImGui::Button("Remove rectangle"))
+		{
+			for (size_t i = mSelectedRectangle; i + 1 < mLighting.mRectangleCount; ++i)
+			{
+				mLighting.mRectangles[i] = mLighting.mRectangles[i + 1];
+			}
+			--mLighting.mRectangleCount;
+			mSelectedRectangle = std::min(mSelectedRectangle, static_cast<int>(mLighting.mRectangleCount) - 1);
+		}
+		ImGui::EndDisabled();
+		ImGui::SliderInt("Rectangle index", &mSelectedRectangle, 0, static_cast<int>(mLighting.mRectangleCount) - 1);
+		auto& rectangle = mLighting.mRectangles[mSelectedRectangle];
 		ImGui::Checkbox("Enable rectangle", &rectangle.mEnabled);
-		ImGui::Checkbox("Rectangle NEE / MIS", &rectangle.mMis);
+		ImGui::Checkbox("Rectangle NEE / MIS", &mLighting.mRectangleMis);
 		ImGui::DragFloat3("Rectangle position (m)", &rectangle.mPosition.x, mRadius * 0.01f);
 		ImGui::SliderFloat("Rectangle width (m)", &rectangle.mWidth, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SliderFloat("Rectangle height (m)", &rectangle.mHeight, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
@@ -856,9 +922,13 @@ void UsdKitchen::render(Renderer& renderer, ID3D12GraphicsCommandList* commands,
 	if (mHasScene)
 	{
 		mRaytracer.render(renderer, mCamera, mViewportLeft, mLighting, mTracing, mExposure, mMeshletColors, commands, backBuffer);
-		if (mGpuTimingLog.is_open() && mRaytracer.gpuMilliseconds() >= 0)
+		if (mRaytracer.gpuMilliseconds() >= 0)
 		{
-			mGpuTimingLog << mRaytracer.gpuMilliseconds() << '\n';
+			mScreenshotGpuMilliseconds += mRaytracer.gpuMilliseconds();
+			if (mGpuTimingLog.is_open())
+			{
+				mGpuTimingLog << mRaytracer.gpuMilliseconds() << ',' << mRaytracer.accumulatedSamples() << '\n';
+			}
 		}
 	}
 }

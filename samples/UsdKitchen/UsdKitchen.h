@@ -20,7 +20,11 @@ public:
 	void update(Renderer& renderer, float deltaTime);
 	void drawGui();
 	void render(Renderer& renderer, ID3D12GraphicsCommandList* commands, ID3D12Resource* backBuffer);
-	bool readyForScreenshot() const { return mHasScene && !mConversionProcess && mRaytracer.accumulatedSamples() >= mScreenshotSamples; }
+	bool readyForScreenshot() const
+	{
+		return mHasScene && !mConversionProcess && mRaytracer.accumulatedSamples() >= mScreenshotSamples
+			&& mScreenshotGpuMilliseconds >= mScreenshotGpuBudget;
+	}
 
 private:
 	void loadModel(const std::filesystem::path& path);
@@ -46,8 +50,11 @@ private:
 	float mViewportLeft = 0.0f;
 	float mExposure = 1.0f;
 	Lighting mLighting;
+	int mSelectedRectangle = 0;
 	PathTracing mTracing;
 	uint64_t mScreenshotSamples = 1;
+	double mScreenshotGpuBudget = 0;
+	double mScreenshotGpuMilliseconds = 0;
 	std::filesystem::path mEnvironmentPath;
 	std::string mEnvironmentName = "Built-in preview sky";
 	bool mMeshletColors = false;

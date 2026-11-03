@@ -61,7 +61,10 @@ cbuffer SceneConstants : register(b0)
 	float environmentRotation;
 	uint environmentMis;
 	float2 padding2;
-	RectangleLight rectangle;
+	uint rectangleCount;
+	uint sampledRectangleCount;
+	float2 rectanglePadding;
+	RectangleLight rectangles[32];
 	uint meshLightCount;
 	uint emissiveMis;
 	uint multipleScattering;
@@ -118,10 +121,18 @@ float3 offsetOrigin(float3 position, float3 geometricNormal)
 {
 	return position + geometricNormal * rayBias(position);
 }
+uint nearestRectangle(RayDesc ray, out float distance)
+{
+	return nearestRectangleLight(rectangles, rectangleCount, ray.Origin, ray.Direction, ray.TMin, ray.TMax, distance);
+}
+uint sampleRectangleIndex(float u)
+{
+	return sampleRectangleLight(rectangles, rectangleCount, u);
+}
 bool rectangleOccludes(RayDesc ray)
 {
 	float distance;
-	return intersectRectangle(rectangle, ray.Origin, ray.Direction, ray.TMin, ray.TMax, distance);
+	return nearestRectangle(ray, distance) < rectangleCount;
 }
 float visibility(float3 position, float3 geometricNormal)
 {
@@ -242,12 +253,12 @@ bool visibleToPoint(Surface surface, float3 lightPoint)
 	}
 	return true;
 }
-float3 rectangleLighting(Surface surface, float3 view, float2 u)
+float3 rectangleLighting(Surface surface, float3 view, RectangleLight rectangle, float2 u)
 {
 	float3 lightPoint = sampleRectanglePoint(rectangle, u);
 	float3 delta = lightPoint - surface.position;
 	float distanceSquared = dot(delta, delta);
-	float pdf = rectanglePdf(rectangle, surface.position, lightPoint);
+	float pdf = rectangle.selectionPdf * rectanglePdf(rectangle, surface.position, lightPoint);
 	if (pdf <= 0.0f)
 	{
 		return 0.0f;
@@ -341,19 +352,21 @@ void RGSMain()
 			payload.hit = 0;
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 			float rectangleDistance;
-			if (intersectRectangle(rectangle, ray.Origin, ray.Direction, ray.TMin, ray.TMax, rectangleDistance)
+			uint rectangleIndex = nearestRectangle(ray, rectangleDistance);
+			if (rectangleIndex < rectangleCount
 				&& (payload.hit == 0 || rectangleDistance < dot(payload.position - ray.Origin, ray.Direction)))
 			{
+				RectangleLight rectangle = rectangles[rectangleIndex];
 				float weight = 1.0f;
 				if (depth > 0 && !previousDelta && rectangle.mis != 0)
 				{
-					if (previousRestir)
+					if (previousRestir && rectangle.selectionPdf > 0)
 					{
 						weight = 0;
 					}
 					else
 					{
-						float pdf = rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
+						float pdf = rectangle.selectionPdf * rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
 						weight = powerHeuristic(previousBsdfPdf, pdf);
 					}
 				}
@@ -420,10 +433,14 @@ void RGSMain()
 				float2 lightU = float2(random(state), random(state));
 				radiance += throughput * environmentLighting(surface, view, lightU);
 			}
-			if (!useRestir && rectangle.enabled != 0 && rectangle.mis != 0)
+			if (!useRestir && sampledRectangleCount > 0)
 			{
+				uint lightIndex = sampleRectangleIndex(random(state));
 				float2 lightU = float2(random(state), random(state));
-				radiance += throughput * rectangleLighting(surface, view, lightU);
+				if (lightIndex < rectangleCount)
+				{
+					radiance += throughput * rectangleLighting(surface, view, rectangles[lightIndex], lightU);
+				}
 			}
 			if (!useRestir && emissiveMis != 0 && meshLightCount > 0)
 			{

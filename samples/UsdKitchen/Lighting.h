@@ -7,7 +7,6 @@
 struct RectangleLighting
 {
 	bool mEnabled = false;
-	bool mMis = true;
 	DirectX::XMFLOAT3 mPosition{0.0f, 2.5f, 0.0f};
 	float mWidth = 1.0f;
 	float mHeight = 1.0f;
@@ -19,7 +18,10 @@ struct RectangleLighting
 
 struct Lighting
 {
-	RectangleLighting mRectangle;
+	static constexpr size_t maximumRectangles = 32;
+	std::array<RectangleLighting, maximumRectangles> mRectangles{};
+	size_t mRectangleCount = 1;
+	bool mRectangleMis = true;
 	bool mPointLight = false;
 	bool mShadows = true;
 	bool mHeadlight = false;

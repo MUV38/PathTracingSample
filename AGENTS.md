@@ -25,6 +25,7 @@ UsdKitchenのBRDF評価・サンプリングを変更した場合はDebug / Rele
 GGXのD・Smith visibility・粗さの定義を変更した場合は `tools/GgxEnergyLut/README.md` の手順でエネルギーLUTも再生成すること。補償あり／なしの白い粗面金属・色付き金属・非金属をWhiteFurnaceで検証すること
 矩形面光源の交差判定・PDF・NEE/MISを変更した場合はDebug / Releaseの `tests/RunRectangleLight.ps1 -Configuration <構成>` を実行すること。保存PNGを開き、大小ライトの半影、表裏、鏡への映り込みも確認すること。手順は `tests/RectangleLight.md` を参照すること
 矩形光源のReSTIR候補・光源種別確率・二重計上処理を変更した場合もRunRectangleLightを両構成で実行し、矩形単独・IBL／発光メッシュ併用のNEEとの平均値比較と保存PNGを確認すること
+複数矩形光源の配列・選択CDF・交差判定を変更した場合は `tests/RunMultipleRectangles.ps1 -Configuration <構成>` も両構成で実行し、1/8/32灯の固定サンプル数・GPU時間予算の画像比較を確認すること。時間計測は他の描画テストと並列実行しないこと。手順・制限はtests/MultipleRectangles.mdを参照すること
 発光メッシュの選択分布・PDF・NEE/MISを変更した場合はDebug / Releaseの `MeshLightTests.exe <出力先>`、`tests/RunEmissiveLights.ps1 -Configuration <構成>`、WhiteFurnaceTestsを実行し、複数色の照明・影・鏡の保存画像も確認すること。手順は `tests/EmissiveLights.md` を参照すること
 
 # サンプル構成

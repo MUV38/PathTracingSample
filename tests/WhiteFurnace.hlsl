@@ -16,6 +16,7 @@ struct TestCase
 	uint flags; // 1: reference, 2: MIS, 4: rectangle, 8: mesh, 16: NDF, 32: single scatter, 64: RR chain, 128: RR off.
 	// 256: mesh reservoir, 512/1024: reservoir mode, 2048: mixed-light reservoir,
 	// 4096: include mesh, 8192: include rectangle, 16384: exclude environment.
+	// 32768: multiple rectangles, 65536: 32 slots (otherwise 2).
 };
 struct Result
 {
@@ -63,6 +64,14 @@ float3 testEnvironmentReservoirValue(Surface surface, float3 view, LightReservoi
 	}
 	return evaluateReservoirSample(surface, view, meshLights[reservoir.lightIndex], reservoir.uv);
 }
+float3 testFiniteReservoirValue(Surface surface, float3 view, LightReservoir reservoir, RectangleLight lights[32])
+{
+	if (isRectangleSample(reservoir.lightIndex))
+	{
+		return evaluateRectangleReservoirSample(surface, view, lights[rectangleSampleIndex(reservoir.lightIndex)], reservoir.uv);
+	}
+	return evaluateReservoirSample(surface, view, meshLights[reservoir.lightIndex], reservoir.uv);
+}
 [numthreads(64, 1, 1)]
 void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
@@ -90,6 +99,44 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	float3 sum = 0, sumSquared = 0, reference = 0, referenceSquared = 0;
 	uint invalid = 0, referenceInvalid = 0;
 	uint rejected = 0;
+	bool multipleRectangles = (input.flags & 32768u) != 0;
+	uint rectangleCount = (input.flags & 65536u) != 0 ? 32u : 2u;
+	RectangleLight rectangleLights[32];
+	if (multipleRectangles)
+	{
+		float totalPower = 0;
+		for (uint i = 0; i < rectangleCount; ++i)
+		{
+			RectangleLight light = rectangle;
+			light.center.z = float(i + 2u);
+			light.width = light.height = light.center.z;
+			light.radiance = (i & 1u) == 0 ? float3(1,0.2f,0.1f) : float3(0.1f,0.5f,1);
+			if (rectangleCount == 32 && i < 2)
+			{
+				light.enabled = i == 0 ? 0u : 1u;
+				light.radiance = 0;
+			}
+			light.selectionPdf = light.width * light.height * dot(light.radiance, float3(0.2126f,0.7152f,0.0722f));
+			totalPower += light.selectionPdf;
+			rectangleLights[i] = light;
+		}
+		float cdf = 0;
+		for (uint i = 0; i < rectangleCount; ++i)
+		{
+			float previous = cdf;
+			cdf = i + 1u == rectangleCount ? 1.0f : cdf + rectangleLights[i].selectionPdf / totalPower;
+			rectangleLights[i].cdf = cdf;
+			rectangleLights[i].selectionPdf = cdf - previous;
+		}
+		float distance;
+		uint nearest = nearestRectangleLight(rectangleLights, rectangleCount, 0, float3(0,0,1), 0.001f, 100, distance);
+		if (nearest != (rectangleCount == 32 ? 1u : 0u) || abs(distance - (rectangleCount == 32 ? 3.0f : 2.0f)) > 0.001f
+			|| nearestRectangleLight(rectangleLights, rectangleCount, float3(0,0,100), float3(0,0,-1), 0.001f, 100, distance) != rectangleCount - 1u
+			|| sampleRectangleLight(rectangleLights, rectangleCount, 0) != (rectangleCount == 32 ? 2u : 0u))
+		{
+			++invalid;
+		}
+	}
 	if (rectangleTarget)
 	{
 		float distance;
@@ -194,7 +241,7 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 			maximum = max(maximum, maxComponent(value));
 			continue;
 		}
-		if ((input.flags & 256u) != 0)
+		if ((input.flags & 256u) != 0 || multipleRectangles)
 		{
 			uint mode = (input.flags >> 9u) & 3u;
 			uint sources = mode >= 2 ? (mode == 3 ? 5u : 2u) : 1u;
@@ -211,21 +258,30 @@ void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 				for (uint candidateIndex = 0; candidateIndex < (mode == 0 ? 1u : 8u); ++candidateIndex)
 				{
 					LightReservoir candidate = (LightReservoir)0;
-					candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+					if (multipleRectangles)
+					{
+						uint lightIndex = sampleRectangleLight(rectangleLights, rectangleCount, random(state));
+						candidate.lightIndex = rectangleLightIndex - lightIndex;
+						RectangleLight light = rectangleLights[lightIndex];
+						candidate.proposalPdf = light.selectionPdf / (light.width * light.height);
+					}
+					else
+					{
+						candidate.lightIndex = sampleMeshLightIndex(meshLights, 2, random(state));
+						candidate.proposalPdf = meshLights[candidate.lightIndex].areaDensity;
+					}
 					candidate.uv = float2(random(state), random(state));
-					MeshLight light = meshLights[candidate.lightIndex];
-					float target = lightSampleTarget(evaluateReservoirSample(sourceSurface, view, light, candidate.uv), light.areaDensity);
-					streamReservoir(reservoir, candidate, target, target / light.areaDensity, 1, random(state));
+					float target = lightSampleTarget(testFiniteReservoirValue(sourceSurface, view, candidate, rectangleLights), candidate.proposalPdf);
+					streamReservoir(reservoir, candidate, target, target / candidate.proposalPdf, 1, random(state));
 				}
 				finishReservoir(reservoir);
-				MeshLight light = meshLights[reservoir.lightIndex];
-				float target = lightSampleTarget(evaluateReservoirSample(surface, view, light, reservoir.uv), light.areaDensity);
+				float target = lightSampleTarget(testFiniteReservoirValue(surface, view, reservoir, rectangleLights), reservoir.proposalPdf);
 				// Also exercise deterministic effective-count capping on reused sources.
 				float count = min(reservoir.count, sourceIndex == 0 ? 8.0f : 4.0f);
 				streamReservoir(combined, reservoir, target, target * reservoir.weight * count, count, random(state));
 			}
 			finishReservoir(combined);
-			float3 value = evaluateReservoirSample(surface, view, meshLights[combined.lightIndex], combined.uv) * combined.weight;
+			float3 value = testFiniteReservoirValue(surface, view, combined, rectangleLights) * combined.weight;
 			if (any(!isfinite(value)) || any(value < 0) || !isfinite(combined.weight) || combined.count <= 0)
 			{
 				++invalid;

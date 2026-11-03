@@ -102,12 +102,13 @@ USDのライトは読み込まず、このサンプル内で設定した光源�
 
 ## 矩形面光源とソフトシャドウ
 
-`Rectangle light` の `Enable rectangle` で片面発光の矩形ライト1灯を有効にします。既定では無効です。
+`Rectangle lights` の `Enable rectangle` で片面発光の矩形ライトを有効にします。最大32灯で、既定は無効な1スロットです。
+`Add rectangle` / `Duplicate rectangle` / `Remove rectangle` で追加・複製・削除し、`Rectangle index` で編集対象を選びます。最後の1スロットは削除せず無効化できます。NEE / MISの切り替えは全矩形に共通です。
 位置、幅・高さ（0.01～100 m）、方位角・仰角、線形RGB色、放射輝度（0～10000）を調整できます。
 仰角-90度は下向き、+90度は上向き、仰角0度・方位角0度は+Z向きです。ロールはありません。
 値はワールド座標で、モデルの再読み込みでは自動配置しません。変更時は蓄積がリセットされます。
 
-矩形の面積上で一様に点を選び、立体角PDFへ変換してNEEを行います。光源までの区間をRayQueryで検査するため、面積に応じた半影が現れます。
+面積×線形輝度のCDFから矩形1灯を選び、面積上で一様に点を選んで立体角PDFへ変換します。光源選択確率をNEE・BSDFヒット・ReSTIRのPDFへ共通で含めます。光源までの区間をRayQueryで検査するため、面積に応じた半影が現れます。
 `Rectangle NEE / MIS` は既定で有効です。無効時はBRDFサンプリングだけになり、特に小さいライトでは収束が遅くなります。
 光源に到達したBRDFレイとのMISはpower heuristicを使い、一次レイと完全鏡のdelta反射には重みを掛けません。
 矩形はカメラ・反射レイに対しても見え、裏面は黒い不透明面です。IBLと既存ライトの遮蔽にも含みます。
@@ -176,7 +177,7 @@ Metallic / Roughnessなどの変更だけでは光源表を再構築しません
 ImGuiの `ReSTIR DI`、または `--restir off|ris|temporal|spatial` で、8候補RIS・時間再利用・空間再利用を段階的に比較できます。
 G-bufferの法線・深度・モーション・Reservoir履歴は `--restir spatial --restir-debug normal|depth|motion|reservoir` で表示します。
 G-buffer viewはNEE / MIS選択中や発光三角形0でも使用できます。例えば `--restir-debug normal` だけで法線を表示します。
-二次ヒット以降は既存の方式です。`--no-ibl-mis` / `--no-emissive-mis` / `--no-rect-mis` は対応する光源をReSTIRの候補からも除きます。矩形は従来どおり1灯で、直接見える光源と完全鏡への映り込みを維持します。
+二次ヒット以降は通常のNEE / MISです。`--no-ibl-mis` / `--no-emissive-mis` / `--no-rect-mis` は対応する光源をReSTIRの候補からも除きます。矩形は最大32灯で、直接見える光源と完全鏡への映り込みを維持します。
 `--ibl-rotation <度>` で環境を回転し、`--gpu-timing <出力.csv>` でGPUの照明パス時間を保存できます。[仕組み・検証・メモリ使用量と制限](../../tests/RestirDI.md) を参照してください。
 
 Russian Rouletteは既定で有効です。3回の反射後からスループットのRGB最大成分に応じて継続を抽選し、生存した経路を確率の逆数で補正します。

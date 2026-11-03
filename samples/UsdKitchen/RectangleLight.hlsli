@@ -10,6 +10,9 @@ struct RectangleLight
 	float height;
 	float3 radiance;
 	uint mis;
+	float selectionPdf;
+	float cdf;
+	float2 padding;
 };
 float3 rectangleNormal(RectangleLight light)
 {
@@ -59,4 +62,31 @@ float3 sampleRectanglePoint(RectangleLight light, float2 u)
 float3 rectangleEmission(RectangleLight light, float3 direction)
 {
 	return dot(rectangleNormal(light), -direction) > 0.0f ? light.radiance : 0.0f;
+}
+uint sampleRectangleLight(RectangleLight lights[32], uint count, float u)
+{
+	for (uint i = 0; i < count; ++i)
+	{
+		if (u < lights[i].cdf)
+		{
+			return i;
+		}
+	}
+	return count;
+}
+uint nearestRectangleLight(RectangleLight lights[32], uint count, float3 origin, float3 direction,
+	float tMin, float tMax, out float distance)
+{
+	distance = tMax;
+	uint nearest = count;
+	for (uint i = 0; i < count; ++i)
+	{
+		float hitDistance;
+		if (intersectRectangle(lights[i], origin, direction, tMin, distance, hitDistance))
+		{
+			distance = hitDistance;
+			nearest = i;
+		}
+	}
+	return nearest;
 }
