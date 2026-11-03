@@ -24,7 +24,7 @@ struct Payload
 };
 
 [shader("raygeneration")]
-void RGSMain()
+void RGS_Main()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
 	if (float(pixel.x) < viewportLeft)
@@ -49,14 +49,14 @@ void RGSMain()
 }
 
 [shader("miss")]
-void RMSMain(inout Payload payload)
+void RMS_Main(inout Payload payload)
 {
 	float sky = saturate(WorldRayDirection().y * 0.5f + 0.5f);
 	payload.color = backgroundColor * lerp(0.65f, 1.65f, sky);
 }
 
 [shader("closesthit")]
-void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes attributes)
+void CHS_Main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attributes)
 {
 	// Two triangles per face, in the same order as the index buffer.
 	const float3 normals[6] = {

@@ -324,7 +324,7 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 #include "RestirPasses.hlsli"
 #include "RayReconstruction.hlsli"
 [shader("raygeneration")]
-void RGSMain()
+void RGS_Main()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
 	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
@@ -598,13 +598,13 @@ void RGSMain()
 	}
 }
 [shader("miss")]
-void RMSMain(inout Payload payload)
+void RMS_Main(inout Payload payload)
 {
 	payload.hit = 0;
 	payload.color = sampleEnvironment(WorldRayDirection());
 }
 [shader("closesthit")]
-void CHSMain(inout Payload payload, in BuiltInTriangleIntersectionAttributes attributes)
+void CHS_Main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attributes)
 {
 	uint meshletIndex = GeometryIndex();
 	uint first = meshlets[meshletIndex].y + PrimitiveIndex() * 3;

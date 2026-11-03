@@ -519,9 +519,9 @@ void MeshRaytracer::createPipeline()
 		throw std::runtime_error("Reading Scene.dxil failed.");
 	}
 	D3D12_EXPORT_DESC exports[] = {
-		{L"RGSMain", nullptr, D3D12_EXPORT_FLAG_NONE},
-		{L"RMSMain", nullptr, D3D12_EXPORT_FLAG_NONE},
-		{L"CHSMain", nullptr, D3D12_EXPORT_FLAG_NONE}
+		{L"RGS_Main", nullptr, D3D12_EXPORT_FLAG_NONE},
+		{L"RMS_Main", nullptr, D3D12_EXPORT_FLAG_NONE},
+		{L"CHS_Main", nullptr, D3D12_EXPORT_FLAG_NONE}
 	};
 	D3D12_DXIL_LIBRARY_DESC library{};
 	library.DXILLibrary = {shader.data(), shader.size()};
@@ -530,7 +530,7 @@ void MeshRaytracer::createPipeline()
 	D3D12_HIT_GROUP_DESC hitGroup{};
 	hitGroup.HitGroupExport = L"CubeHitGroup";
 	hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-	hitGroup.ClosestHitShaderImport = L"CHSMain";
+	hitGroup.ClosestHitShaderImport = L"CHS_Main";
 	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{15 * sizeof(float), 2 * sizeof(float)};
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{1};
 	ID3D12RootSignature* globalRoot = mRootSignature.Get();
@@ -554,7 +554,7 @@ void MeshRaytracer::createShaderTable()
 	check(mPipeline.As(&properties), "Query DXR shader identifiers");
 	constexpr UINT recordSize = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
 	std::array<BYTE, recordSize * 3> records{};
-	const wchar_t* names[] = {L"RGSMain", L"RMSMain", L"CubeHitGroup"};
+	const wchar_t* names[] = {L"RGS_Main", L"RMS_Main", L"CubeHitGroup"};
 	for (size_t index = 0; index < std::size(names); ++index)
 	{
 		const void* identifier = properties->GetShaderIdentifier(names[index]);

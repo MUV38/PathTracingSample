@@ -18,7 +18,7 @@
 		<ClInclude Include="..\samples\UsdKitchen\RectangleLight.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\EnvironmentSampling.hlsli" />
 		<CustomBuild Include="WhiteFurnace.hlsl">
-			<Command>"$(DxcExecutable)" -T cs_6_0 -E CSMain -HV 2021 -WX -Fo "$(OutDir)WhiteFurnace.dxil" "%(FullPath)"</Command>
+			<Command>"$(DxcExecutable)" -T cs_6_0 -E CS_Main -HV 2021 -WX -Fo "$(OutDir)WhiteFurnace.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)WhiteFurnace.dxil</Outputs>
 			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;$(ProjectDir)..\samples\UsdKitchen\RestirDI.hlsli;$(ProjectDir)..\samples\UsdKitchen\RussianRoulette.hlsli;$(ProjectDir)..\samples\UsdKitchen\GgxEnergy.hlsli;$(ProjectDir)..\samples\UsdKitchen\EnvironmentSampling.hlsli;$(ProjectDir)..\samples\UsdKitchen\RectangleLight.hlsli;$(ProjectDir)..\samples\UsdKitchen\MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 		</CustomBuild>
