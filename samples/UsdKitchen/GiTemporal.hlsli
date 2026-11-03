@@ -14,7 +14,7 @@ Surface giSourceSurface(GiCandidate source)
 	return surface;
 }
 
-bool compatibleGiSources(GiCandidate current, GiCandidate previous)
+bool compatibleGiSources(GiCandidate current, GiCandidate previous, float footprintScale)
 {
 	float depth = dot(current.sourcePosition - cameraPosition, cameraForward);
 	float footprint = 4 * max(depth, 0.001f) * tanHalfFov / float(DispatchRaysDimensions().y);
@@ -23,7 +23,7 @@ bool compatibleGiSources(GiCandidate current, GiCandidate previous)
 		&& dot(current.sourceNormal, previous.sourceNormal) > 0.98f
 		&& dot(current.sourceGeometricNormal, previous.sourceGeometricNormal) > 0.98f
 		&& all(abs(current.sourceBaseColor - previous.sourceBaseColor) < 0.05f)
-		&& distance(current.sourcePosition, previous.sourcePosition) <= max(footprint, 4 * shadowBias);
+		&& distance(current.sourcePosition, previous.sourcePosition) <= max(footprint * footprintScale, 4 * shadowBias);
 }
 
 float giConnectionJacobian(GiCandidate lightSample, float3 sourcePosition)
@@ -77,7 +77,7 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	}
 	uint2 previous = uint2(previousPixel);
 	GiCandidate history = previousGiCandidates[previous.x + previous.y * uint(dimensions.x)];
-	if (!compatibleGiSources(current, history))
+	if (!compatibleGiSources(current, history, 1))
 	{
 		return fresh;
 	}

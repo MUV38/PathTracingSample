@@ -119,7 +119,7 @@ struct SceneConstants
 	uint32_t mGiEnabled = 0;
 	uint32_t mGiView = 0;
 	uint32_t mGiUseHistory = 1;
-	uint32_t mGiPadding = 0;
+	uint32_t mGiUseSpatial = 1;
 	uint32_t mHistoryValid = 0;
 	uint32_t mRestirFrame = 0;
 	uint32_t mGiHistoryValid = 0;
@@ -647,7 +647,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 9 || tracing.mGiMode > 2)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 10 || tracing.mGiMode > 3)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -691,10 +691,14 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
-	constants.mGiEnabled = meshletColors ? 0u : (tracing.mGiView == 8 ? 2u : (std::max)(tracing.mGiMode, tracing.mGiView > 0 ? 1u : 0u));
+	const uint32_t guideGiMode = tracing.mGiView == 10 ? 3u : tracing.mGiView == 8 ? 2u : tracing.mGiView > 0 ? 1u : 0u;
+	constants.mGiEnabled = meshletColors ? 0u : (std::max)(tracing.mGiMode, guideGiMode);
 	constants.mGiView = meshletColors ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
+	const bool spatialGi = constants.mGiEnabled == 3 && tracing.mGiSpatial && tracing.mMaxBounces > 0
+		&& constants.mRestirDebug == 0 && (constants.mGiView < 3 || constants.mGiView >= 8) && (!useRR || mRRView <= 1);
+	constants.mGiUseSpatial = spatialGi ? 1u : 0u;
 	const bool reconstructRR = useRR && mRRView == 0;
 	if (useRR)
 	{
@@ -727,7 +731,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		mGiPixels = giPixels;
 		mGiHistoryValid = false;
 	}
-	const bool temporalGi = constants.mGiEnabled == 2 && tracing.mMaxBounces > 0 && constants.mRestirDebug == 0
+	const bool temporalGi = constants.mGiEnabled >= 2 && tracing.mMaxBounces > 0 && constants.mRestirDebug == 0
 		&& !(constants.mGiView >= 4 && constants.mGiView <= 7) && (!useRR || mRRView <= 1);
 	const size_t previousGiPixels = temporalGi ? giPixels : 1;
 	if (mPreviousGiPixels != previousGiPixels)
@@ -927,6 +931,16 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 			commands->DispatchRays(&dispatch);
 		}
 		commands->ResourceBarrier(1, &restirBarrier);
+	}
+	if (spatialGi)
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(100, 190, 150), "GI / current raw candidate prepass");
+		commands->SetComputeRoot32BitConstant(12, 4, 0);
+		commands->DispatchRays(&dispatch);
+		D3D12_RESOURCE_BARRIER giBarrier{};
+		giBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+		giBarrier.UAV.pResource = mGiCandidates.Get();
+		commands->ResourceBarrier(1, &giBarrier);
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	{

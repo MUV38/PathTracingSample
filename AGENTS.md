@@ -19,7 +19,7 @@ if文で1行で終わる実行コードも{}で囲い、それぞれ改行する
 UsdKitchenの間接照明・IBLを確認するときは `--samples 128 --screenshot <保存先.png>` などで蓄積を待つこと。既定の数フレーム撮影だけで収束を評価しないこと
 Russian Rouletteの継続確率・重み・適用位置を変更した場合はDebug / Releaseの `tests/RunRussianRoulette.ps1 -Configuration <構成>` を実行し、RR有無のPNGを開いて確認すること。検証範囲は `tests/RussianRoulette.md` を参照すること
 ReSTIR DIのReservoir・G-buffer・再投影・履歴・発光の二重計上処理を変更した場合はDebug / Releaseの `tests/RunRestirDI.ps1 -Configuration <構成>` を実行し、NEEとの平均値・モーション・履歴表示と保存PNGを確認すること。手順と制限は `tests/RestirDI.md` を参照すること
-拡散GI候補の生成・PDF・放射輝度・経路の分離／再構成を変更した場合はDebug / Releaseの `tests/RunRestirGI.ps1 -Configuration <構成>` を実行し、通常PT／DI／RR併用との明るさ比較、候補と成分の保存PNGを確認すること。時間再利用・再投影・履歴の破棄・可視性・MISを変更した場合は `tests/RunGiTemporal.ps1 -Configuration <構成>` も両構成で実行し、RGBの平均値、ノイズ、履歴表示、カメラ／設定変更／リサイズの検証を確認すること。現在の時間再利用は平坦なLambert二次面の前フレーム生候補1つに限定し、再帰的reservoir蓄積・空間再利用が完成したものとして扱わないこと。制限と検証範囲は `tests/RestirGI.md` を参照すること
+拡散GI候補の生成・PDF・放射輝度・経路の分離／再構成を変更した場合はDebug / Releaseの `tests/RunRestirGI.ps1 -Configuration <構成>` を実行し、通常PT／DI／RR併用との明るさ比較、候補と成分の保存PNGを確認すること。時間再利用・再投影・履歴の破棄・可視性・MISを変更した場合は `tests/RunGiTemporal.ps1 -Configuration <構成>` も両構成で実行し、RGBの平均値、ノイズ、履歴表示、カメラ／設定変更／リサイズの検証を確認すること。空間再利用・相互接続の可視性・多提案MISを変更した場合は `tests/RunGiSpatial.ps1 -Configuration <構成>` を両構成で実行し、保存PNG・RGB平均値・近隣候補の選択・ノイズ・GPU時間を確認すること。GPU時間の計測は他の描画テストと並列実行しないこと。時間・空間再利用は平坦なLambert二次面の生候補に限定し、再帰的reservoir蓄積が完成したものとして扱わないこと。制限と検証範囲は `tests/RestirGI.md` を参照すること
 ReSTIR DIのIBL・光源種別の混合・Miss寄与を変更した場合は `tests/RunRestirEnvironment.ps1 -Configuration <構成>` もDebug / Releaseで実行し、通常CDFと確率0を含むCDF、既存IBL MISとの画像・平均値・GPU時間の比較を確認すること。時間計測時は構成を並列実行しないこと
 IBLのHDR読み込みを変更した場合はDebug / Releaseの `EnvironmentMapTests.exe build/checks` を実行すること
 IBLのサンプリング分布・NEE・MISを変更した場合もEnvironmentMapTestsとRunWhiteFurnaceを両構成で実行し、`--no-ibl-mis` と同じサンプル数で画像を比較すること

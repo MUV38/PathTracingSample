@@ -87,7 +87,7 @@ cbuffer SceneConstants : register(b0)
 	uint giEnabled;
 	uint giView;
 	uint giUseHistory;
-	uint giPadding;
+	uint giUseSpatial;
 	uint historyValid;
 	uint restirFrame;
 	uint giHistoryValid;
@@ -332,6 +332,7 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 }
 #include "RestirPasses.hlsli"
 #include "GiTemporal.hlsli"
+#include "GiSpatial.hlsli"
 #include "RayReconstruction.hlsli"
 [shader("raygeneration")]
 void RGS_Main()
@@ -339,7 +340,7 @@ void RGS_Main()
 	uint2 pixel = DispatchRaysIndex().xy;
 	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
 	bool fixedGiGuide = giView >= 4 && giView <= 6;
-	state ^= ((fixedGiGuide ? 0u : (giEnabled == 2 ? restirFrame : (rrEnabled != 0 ? rrFrame : frameIndex))) + 1u) * 277803737u;
+	state ^= ((fixedGiGuide ? 0u : (giEnabled >= 2 ? restirFrame : (rrEnabled != 0 ? rrFrame : frameIndex))) + 1u) * 277803737u;
 	if (restirPass == 3)
 	{
 		if (float(pixel.x) < viewportLeft)
@@ -390,10 +391,14 @@ void RGS_Main()
 		prepareRestir(pixel, state);
 		return;
 	}
+	bool giCandidatePrepass = restirPass == 4;
 	if (float(pixel.x) < viewportLeft)
 	{
-		outputImage[pixel] = float4(backgroundColor, 1.0f);
-		if (giEnabled != 0)
+		if (!giCandidatePrepass)
+		{
+			outputImage[pixel] = float4(backgroundColor, 1.0f);
+		}
+		if (giEnabled != 0 && (giUseSpatial == 0 || giCandidatePrepass))
 		{
 			giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = (GiCandidate)0;
 		}
@@ -401,10 +406,11 @@ void RGS_Main()
 	}
 	float3 frameRadiance = 0.0f;
 	float3 historyColor = 0;
-	for (uint sampleIndex = 0; sampleIndex < samplesPerFrame; ++sampleIndex)
+	float3 spatialColor = 0;
+	for (uint sampleIndex = 0; sampleIndex < (giCandidatePrepass ? 1u : samplesPerFrame); ++sampleIndex)
 	{
 		float2 dimensions = float2(DispatchRaysDimensions().xy);
-		float2 jitter = fixedGiGuide || giView == 8 ? 0.5f : (rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state)));
+		float2 jitter = fixedGiGuide || giView == 8 || giView == 10 ? 0.5f : (rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state)));
 		float2 uv = float2((float(pixel.x) - viewportLeft + jitter.x) / max(dimensions.x - viewportLeft, 1.0f),
 			(float(pixel.y) + jitter.y) / dimensions.y);
 		float2 screen = uv * 2.0f - 1.0f;
@@ -432,7 +438,7 @@ void RGS_Main()
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 			float rectangleDistance;
 			uint rectangleIndex = nearestRectangle(ray, rectangleDistance);
-			if (rrEnabled != 0 && sampleIndex == 0 && depth == 0)
+			if (!giCandidatePrepass && rrEnabled != 0 && sampleIndex == 0 && depth == 0)
 			{
 				writeRRGuides(pixel, ray, payload, rectangleIndex, rectangleDistance);
 				if (rrDebug >= 2)
@@ -488,7 +494,7 @@ void RGS_Main()
 				material.emissiveStrength = 0;
 			}
 			float3 view = -ray.Direction;
-			if (giEnabled == 2 && depth == 0 && maxBounces > 0)
+			if (giEnabled >= 2 && depth == 0 && maxBounces > 0)
 			{
 				candidate.sourcePosition = surface.position;
 				candidate.sourceTriangle = payload.triangleIndex;
@@ -508,6 +514,11 @@ void RGS_Main()
 				candidate.valid = candidate.areaPdf > 0 && isfinite(candidate.areaPdf) ? 1u : 0u;
 				// Exact direction-independent radiance only: flat-normal Lambertian secondary surfaces.
 				candidate.reusable = material.metallic == 0 && material.specular == 0 && payload.flatNormal != 0 ? 1u : 0u;
+			}
+			if (giCandidatePrepass && (candidate.sourceValid == 0 || (depth == 1 && (candidate.valid == 0 || candidate.reusable == 0))))
+			{
+				// Keep the primary proposal even if its raw draw cannot be reused.
+				break;
 			}
 			float emissionWeight = 1.0f;
 			if (depth > 0 && !previousDelta && emissiveMis != 0 && meshLightCount > 0)
@@ -596,7 +607,7 @@ void RGS_Main()
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
 				float3 factor = giDiffuseBrdfCosine(surface, view, nextDirection);
-				if (pdf > 1e-10f && (maxComponent(factor) > 0 || (giEnabled == 2 && candidate.sourceValid != 0)))
+				if (pdf > 1e-10f && (maxComponent(factor) > 0 || (giEnabled >= 2 && candidate.sourceValid != 0)))
 				{
 					candidate.sourcePosition = surface.position;
 					candidate.sourceTriangle = payload.triangleIndex;
@@ -635,8 +646,13 @@ void RGS_Main()
 		}
 		candidate.radiance = suffixRadiance;
 		candidate.targetDensity = dot(max(candidate.diffuseBrdfCosine * suffixRadiance, 0), float3(0.2126f, 0.7152f, 0.0722f));
+		if (giCandidatePrepass)
+		{
+			giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
+			return;
+		}
 		float3 diffuseGi = shadeGiCandidate(candidate);
-		if (giEnabled == 2 && candidate.reusable == 0)
+		if (giEnabled >= 2 && candidate.reusable == 0)
 		{
 			// The non-Lambertian part remains in ordinary PT, including fresh misses.
 			diffuseGi = 0;
@@ -645,7 +661,12 @@ void RGS_Main()
 		float3 remainder = radiance - referenceDiffuse;
 		float3 freshGi = diffuseGi;
 		float3 sampleHistoryColor = 0;
-		if (giEnabled == 2)
+		float3 sampleSpatialColor = 0;
+		if (giUseSpatial != 0)
+		{
+			diffuseGi = spatialGi(candidate, pixel, sampleIndex, sampleHistoryColor, sampleSpatialColor);
+		}
+		else if (giEnabled >= 2)
 		{
 			diffuseGi = temporalGi(candidate, pixel, sampleIndex, sampleHistoryColor);
 		}
@@ -655,8 +676,12 @@ void RGS_Main()
 			radiance = remainder + diffuseGi;
 			if (sampleIndex == 0)
 			{
-				giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
+				if (giUseSpatial == 0)
+				{
+					giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
+				}
 				historyColor = sampleHistoryColor;
+				spatialColor = sampleSpatialColor;
 			}
 		}
 		if (giView == 1 || giView == 9)
@@ -692,6 +717,10 @@ void RGS_Main()
 	if (giView == 8)
 	{
 		outputImage[pixel] = float4(historyColor, 1);
+	}
+	else if (giView == 10)
+	{
+		outputImage[pixel] = float4(spatialColor, 1);
 	}
 	else if (giView == 9)
 	{
