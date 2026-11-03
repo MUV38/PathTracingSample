@@ -4,5 +4,6 @@
 *.vcxproj.user
 /build_support/Usd.local.props
 /build_support/Streamline.local.props
+/build_support/Clas.local.props
 /assets/local/
 /assets/Source/Kitchen_set/

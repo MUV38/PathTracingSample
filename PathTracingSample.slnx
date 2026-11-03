@@ -6,6 +6,7 @@
     <Project Path="common/SampleFramework.vcxproj" Id="15ab62db-3209-43ed-874f-71efa2815baa" />
   </Folder>
   <Folder Name="/Samples/">
+	<Project Path="samples/ClasSandbox/ClasSandbox.vcxproj" Id="d74aa697-c6ef-4c79-91e2-b18287ca0d52" />
     <Project Path="PathTracingSample.vcxproj" Id="65ea1ca1-5843-35c0-9fbc-420bc2c3c72e" />
     <Project Path="samples/DxrCube/DxrCube.vcxproj" Id="1cadce68-c963-4f5f-a5f8-6ecb2a9b9439" />
     <Project Path="samples/UsdKitchen/UsdKitchen.vcxproj" DefaultStartup="true" Id="f4680a75-5d93-4afb-a63a-79dc02ccb6c8" />
