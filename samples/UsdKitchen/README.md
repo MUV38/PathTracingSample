@@ -212,7 +212,13 @@ IBLロード時に線形輝度と画素の立体角から行・列のCDFを作�
 各反射でIBLを1サンプル評価し、既存のBRDFサンプルとpower heuristic（指数2）で重み付けします。
 反射レイがIBLへMissした場合だけMISの重みを掛け、背景・完全鏡のdelta反射・物体の発光にはその重みを掛けません。
 NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBLの遮蔽は常に検査し、Direct lightingのShadows切り替えとは独立です。
-固定のバウンス上限によるパストレーシングです。デノイズ、Russian roulette、透過反射は未実装です。
+固定バウンス上限とRussian Rouletteによるパストレーシングです。DLSS Ray Reconstructionは任意で使用できます。透過反射は未実装です。
+
+### 拡散GIの候補生成
+
+`ReSTIR GI / initial candidates` または `--restir-gi candidates` で、既存PTから拡散間接光の候補を生成し、再利用なしで評価します。
+`--gi-view diffuse|remainder|radiance|normal|pdf|valid|error` で成分・候補を確認できます。通常表示は `--gi-view output` です。
+この段階には時間／空間再利用やノイズ低減は含みません。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 
 ```powershell

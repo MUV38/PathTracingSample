@@ -28,6 +28,7 @@
 		<ClInclude Include="PathTracing.h" />
 		<ClInclude Include="Pbr.hlsli" />
 		<ClInclude Include="RestirDI.hlsli" />
+		<ClInclude Include="RestirGI.hlsli" />
 		<ClInclude Include="RestirPasses.hlsli" />
 		<ClInclude Include="RussianRoulette.hlsli" />
 		<ClInclude Include="GgxEnergy.hlsli" />
@@ -38,7 +39,7 @@
 		<CustomBuild Include="Scene.hlsl">
 			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Zi -Qembed_debug -Fo "$(OutDir)Scene.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)Scene.dxil</Outputs>
-			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)RayReconstruction.hlsli;$(ProjectDir)RestirDI.hlsli;$(ProjectDir)RestirPasses.hlsli;$(ProjectDir)RussianRoulette.hlsli;$(ProjectDir)GgxEnergy.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<AdditionalInputs>$(ProjectDir)Pbr.hlsli;$(ProjectDir)RayReconstruction.hlsli;$(ProjectDir)RestirDI.hlsli;$(ProjectDir)RestirGI.hlsli;$(ProjectDir)RestirPasses.hlsli;$(ProjectDir)RussianRoulette.hlsli;$(ProjectDir)GgxEnergy.hlsli;$(ProjectDir)EnvironmentSampling.hlsli;$(ProjectDir)RectangleLight.hlsli;$(ProjectDir)MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 			<Message>Compiling converted-mesh DXR shaders</Message>
 		</CustomBuild>
 		<Content Include="$(RepositoryRoot)assets\PreviewRoom.ptscene">

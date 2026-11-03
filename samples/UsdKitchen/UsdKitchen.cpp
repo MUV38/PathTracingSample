@@ -319,6 +319,28 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mRussianRoulette = false;
 			continue;
 		}
+		if (flag == L"--restir-gi" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			if (value != L"off" && value != L"candidates")
+			{
+				throw std::runtime_error("--restir-gi expects off or candidates (no reuse yet).");
+			}
+			mTracing.mGiCandidates = value == L"candidates";
+			continue;
+		}
+		if (flag == L"--gi-view" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			const std::array<std::wstring,8> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error"};
+			const auto view = std::find(views.begin(), views.end(), value);
+			if (view == views.end())
+			{
+				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, or error.");
+			}
+			mTracing.mGiView = static_cast<uint32_t>(view - views.begin());
+			continue;
+		}
 		if ((flag == L"--restir" || flag == L"--restir-debug") && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -855,6 +877,16 @@ void UsdKitchen::drawGui()
 		mTracing.mRestirMode = static_cast<uint32_t>(mode);
 		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
 		ImGui::TextWrapped("Primary IBL, emissive mesh and rectangle lighting. Secondary bounces use existing NEE / MIS.");
+	}
+	if (ImGui::CollapsingHeader("ReSTIR GI / initial candidates"))
+	{
+		ImGui::Checkbox("Generate diffuse GI candidates", &mTracing.mGiCandidates);
+		int view = static_cast<int>(mTracing.mGiView);
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Reconstruction error x1000\0");
+		mTracing.mGiView = static_cast<uint32_t>(view);
+		ImGui::TextWrapped("One candidate from each PT path; no temporal/spatial reuse. Output replaces the diffuse indirect term, preserving the original proposal and MIS.");
+		ImGui::TextWrapped("Primary roughness below 0.2 and pure metals use ordinary PT. Diagnostic views enable candidate generation and bypass RR. Normal/PDF/valid use fixed samples.");
+		ImGui::TextWrapped("Candidate buffer: 96 bytes/pixel while enabled; stores the first sample of the current frame only.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
 	{

@@ -4,6 +4,7 @@
 #include "MeshLight.hlsli"
 #include "RussianRoulette.hlsli"
 #include "RestirDI.hlsli"
+#include "RestirGI.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0);
 struct Vertex
@@ -37,6 +38,7 @@ RWTexture2D<float4> rrDiffuseAlbedo : register(u11);
 RWTexture2D<float4> rrSpecularAlbedo : register(u12);
 RWTexture2D<float> rrSpecularDistance : register(u13);
 RWTexture2D<float4> rrOutput : register(u14);
+RWStructuredBuffer<GiCandidate> giCandidates : register(u15);
 cbuffer RestirPass : register(b1)
 {
 	uint restirPass;
@@ -81,6 +83,9 @@ cbuffer SceneConstants : register(b0)
 	uint restirDebug;
 	uint rrEnabled;
 	uint rrDebug;
+	uint giEnabled;
+	uint giView;
+	uint2 giPadding;
 	uint historyValid;
 	uint restirFrame;
 	float2 historyPadding;
@@ -328,7 +333,8 @@ void RGS_Main()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
 	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
-	state ^= ((rrEnabled != 0 ? rrFrame : frameIndex) + 1u) * 277803737u;
+	bool fixedGiGuide = giView >= 4 && giView <= 6;
+	state ^= ((fixedGiGuide ? 0u : (rrEnabled != 0 ? rrFrame : frameIndex)) + 1u) * 277803737u;
 	if (restirPass == 3)
 	{
 		if (float(pixel.x) < viewportLeft)
@@ -382,13 +388,17 @@ void RGS_Main()
 	if (float(pixel.x) < viewportLeft)
 	{
 		outputImage[pixel] = float4(backgroundColor, 1.0f);
+		if (giEnabled != 0)
+		{
+			giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = (GiCandidate)0;
+		}
 		return;
 	}
 	float3 frameRadiance = 0.0f;
 	for (uint sampleIndex = 0; sampleIndex < samplesPerFrame; ++sampleIndex)
 	{
 		float2 dimensions = float2(DispatchRaysDimensions().xy);
-		float2 jitter = rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state));
+		float2 jitter = fixedGiGuide ? 0.5f : (rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state)));
 		float2 uv = float2((float(pixel.x) - viewportLeft + jitter.x) / max(dimensions.x - viewportLeft, 1.0f),
 			(float(pixel.y) + jitter.y) / dimensions.y);
 		float2 screen = uv * 2.0f - 1.0f;
@@ -404,6 +414,11 @@ void RGS_Main()
 		bool previousDelta = true;
 		bool previousRestir = false;
 		float3 previousPosition = cameraPosition;
+		GiCandidate candidate = (GiCandidate)0;
+		float3 suffixThroughput = 1;
+		float3 suffixRadiance = 0;
+		float3 referenceDiffuse = 0;
+		float3 diffuseRatio = 0;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
@@ -436,12 +451,14 @@ void RGS_Main()
 						weight = powerHeuristic(previousBsdfPdf, pdf);
 					}
 				}
-				radiance += throughput * rectangleEmission(rectangle, ray.Direction) * weight;
+				addGiPathRadiance(rectangleEmission(rectangle, ray.Direction) * weight, throughput,
+					candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				break;
 			}
 			if (payload.hit == 0)
 			{
-				radiance += throughput * payload.color * missWeight;
+				addGiPathRadiance(payload.color * missWeight, throughput,
+					candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				break;
 			}
 			Material material = materials[payload.materialIndex];
@@ -465,6 +482,13 @@ void RGS_Main()
 				material.emissiveStrength = 0;
 			}
 			float3 view = -ray.Direction;
+			if (giEnabled != 0 && depth == 1 && candidate.solidAnglePdf > 0)
+			{
+				candidate.position = payload.position;
+				candidate.normal = payload.geometricNormal;
+				candidate.areaPdf = giAreaPdf(candidate.solidAnglePdf, candidate.sourcePosition, candidate.position, candidate.normal);
+				candidate.valid = candidate.areaPdf > 0 && isfinite(candidate.areaPdf) ? 1u : 0u;
+			}
 			float emissionWeight = 1.0f;
 			if (depth > 0 && !previousDelta && emissiveMis != 0 && meshLightCount > 0)
 			{
@@ -478,7 +502,12 @@ void RGS_Main()
 					emissionWeight = powerHeuristic(previousBsdfPdf, pdf);
 				}
 			}
-			radiance += throughput * (material.emissiveColor * material.emissiveStrength * emissionWeight + directLighting(surface, view));
+			// Emission at the secondary surface is direct lighting of the primary:
+			// keep it (and its existing MIS weight) outside the diffuse GI candidate.
+			addGiPathRadiance(material.emissiveColor * material.emissiveStrength * emissionWeight, throughput,
+				candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
+			addGiPathRadiance(directLighting(surface, view), throughput, candidate.valid != 0,
+				suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			if (depth == maxBounces)
 			{
 				break;
@@ -492,12 +521,14 @@ void RGS_Main()
 			}
 			if (useRestir)
 			{
-				radiance += throughput * restirLighting(surface, view, pixel);
+				addGiPathRadiance(restirLighting(surface, view, pixel), throughput, candidate.valid != 0,
+					suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			}
 			if (!useRestir && environmentMis != 0 && environmentIntensity > 0.0f)
 			{
 				float2 lightU = float2(random(state), random(state));
-				radiance += throughput * environmentLighting(surface, view, lightU);
+				addGiPathRadiance(environmentLighting(surface, view, lightU), throughput, candidate.valid != 0,
+					suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			}
 			if (!useRestir && sampledRectangleCount > 0)
 			{
@@ -505,13 +536,15 @@ void RGS_Main()
 				float2 lightU = float2(random(state), random(state));
 				if (lightIndex < rectangleCount)
 				{
-					radiance += throughput * rectangleLighting(surface, view, rectangles[lightIndex], lightU);
+					addGiPathRadiance(rectangleLighting(surface, view, rectangles[lightIndex], lightU), throughput, candidate.valid != 0,
+						suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				}
 			}
 			if (!useRestir && emissiveMis != 0 && meshLightCount > 0)
 			{
 				float3 lightU = float3(random(state), random(state), random(state));
-				radiance += throughput * emissiveLighting(surface, view, lightU, payload.triangleIndex);
+				addGiPathRadiance(emissiveLighting(surface, view, lightU, payload.triangleIndex), throughput, candidate.valid != 0,
+					suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
@@ -520,6 +553,10 @@ void RGS_Main()
 				break;
 			}
 			throughput *= weight;
+			if (candidate.valid != 0)
+			{
+				suffixThroughput *= weight;
+			}
 			float survival = pathSurvivalProbability(throughput, depth + 1u, russianRoulette != 0);
 			if (survival < 1.0f)
 			{
@@ -527,9 +564,29 @@ void RGS_Main()
 				{
 					break;
 				}
+				if (candidate.valid != 0)
+				{
+					suffixThroughput /= survival;
+				}
 			}
 			missWeight = 1.0f;
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
+			if (giEnabled != 0 && depth == 0 && !delta)
+			{
+				float pdf;
+				evaluateBsdf(surface, view, nextDirection, pdf);
+				float3 factor = giDiffuseBrdfCosine(surface, view, nextDirection);
+				if (pdf > 1e-10f && maxComponent(factor) > 0)
+				{
+					candidate.sourcePosition = surface.position;
+					candidate.sourceTriangle = payload.triangleIndex;
+					candidate.solidAnglePdf = pdf;
+					candidate.inversePdf = rcp(pdf);
+					candidate.diffuseBrdfCosine = factor;
+					candidate.direction = nextDirection;
+					diffuseRatio = select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
+				}
+			}
 			if (environmentMis != 0 && environmentIntensity > 0.0f && !delta)
 			{
 				float bsdfPdf;
@@ -556,6 +613,35 @@ void RGS_Main()
 			ray.Origin = offsetOrigin(payload.position, payload.geometricNormal);
 			ray.TMin = 0.0f;
 		}
+		candidate.radiance = suffixRadiance;
+		candidate.targetDensity = dot(max(candidate.diffuseBrdfCosine * suffixRadiance, 0), float3(0.2126f, 0.7152f, 0.0722f));
+		float3 diffuseGi = shadeGiCandidate(candidate);
+		float3 remainder = radiance - referenceDiffuse;
+		// Replace the sampled diffuse indirect contribution; never add it twice.
+		if (giEnabled != 0)
+		{
+			radiance = remainder + diffuseGi;
+			if (sampleIndex == 0)
+			{
+				giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
+			}
+		}
+		if (giView == 1)
+		{
+			radiance = diffuseGi;
+		}
+		else if (giView == 2)
+		{
+			radiance = max(remainder, 0);
+		}
+		else if (giView == 3)
+		{
+			radiance = candidate.valid != 0 ? suffixRadiance : 0;
+		}
+		else if (giView == 7)
+		{
+			radiance = abs(diffuseGi - referenceDiffuse) * 1000;
+		}
 		frameRadiance += radiance;
 	}
 	frameRadiance /= float(samplesPerFrame);
@@ -570,6 +656,27 @@ void RGS_Main()
 		rrColor[uint2(pixel.x - uint(viewportLeft), pixel.y)] = float4(frameRadiance, 1);
 	}
 	outputImage[pixel] = float4(displayColor(average), 1.0f);
+	if (fixedGiGuide)
+	{
+		GiCandidate guide = giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x];
+		float3 color = 0;
+		if (guide.valid != 0)
+		{
+			if (giView == 4)
+			{
+				color = guide.normal * 0.5f + 0.5f;
+			}
+			else if (giView == 5)
+			{
+				color = float3(guide.solidAnglePdf / (1 + guide.solidAnglePdf), guide.areaPdf / (1 + guide.areaPdf), 0);
+			}
+			else
+			{
+				color = float3(0, 1, 0);
+			}
+		}
+		outputImage[pixel] = float4(color, 1);
+	}
 	if (restirDebug > 0)
 	{
 		uint address = pixel.x + pixel.y * DispatchRaysDimensions().x;

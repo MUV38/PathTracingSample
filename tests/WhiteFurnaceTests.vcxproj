@@ -12,6 +12,7 @@
 		<ClInclude Include="..\samples\UsdKitchen\MeshLight.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\Pbr.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\RestirDI.hlsli" />
+		<ClInclude Include="..\samples\UsdKitchen\RestirGI.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\RussianRoulette.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\GgxEnergy.hlsli" />
 		<ClInclude Include="..\samples\UsdKitchen\GgxEnergyLut.h" />
@@ -20,7 +21,7 @@
 		<CustomBuild Include="WhiteFurnace.hlsl">
 			<Command>"$(DxcExecutable)" -T cs_6_0 -E CS_Main -HV 2021 -WX -Fo "$(OutDir)WhiteFurnace.dxil" "%(FullPath)"</Command>
 			<Outputs>$(OutDir)WhiteFurnace.dxil</Outputs>
-			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;$(ProjectDir)..\samples\UsdKitchen\RestirDI.hlsli;$(ProjectDir)..\samples\UsdKitchen\RussianRoulette.hlsli;$(ProjectDir)..\samples\UsdKitchen\GgxEnergy.hlsli;$(ProjectDir)..\samples\UsdKitchen\EnvironmentSampling.hlsli;$(ProjectDir)..\samples\UsdKitchen\RectangleLight.hlsli;$(ProjectDir)..\samples\UsdKitchen\MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<AdditionalInputs>$(ProjectDir)..\samples\UsdKitchen\Pbr.hlsli;$(ProjectDir)..\samples\UsdKitchen\RestirDI.hlsli;$(ProjectDir)..\samples\UsdKitchen\RestirGI.hlsli;$(ProjectDir)..\samples\UsdKitchen\RussianRoulette.hlsli;$(ProjectDir)..\samples\UsdKitchen\GgxEnergy.hlsli;$(ProjectDir)..\samples\UsdKitchen\EnvironmentSampling.hlsli;$(ProjectDir)..\samples\UsdKitchen\RectangleLight.hlsli;$(ProjectDir)..\samples\UsdKitchen\MeshLight.hlsli;%(AdditionalInputs)</AdditionalInputs>
 		</CustomBuild>
 	</ItemGroup>
 	<Import Project="..\build_support\Cpp.targets" />
