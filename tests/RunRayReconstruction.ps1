@@ -107,3 +107,4 @@ foreach ($case in $cases)
 }
 $summary | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputPath "images.json") -Encoding utf8
 Write-Output "RR checks passed. Open the saved PNGs for visual inspection."
+& (Join-Path $PSScriptRoot "RunRayReconstructionStability.ps1") -Configuration $Configuration

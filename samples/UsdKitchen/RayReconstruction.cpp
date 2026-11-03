@@ -244,7 +244,9 @@ void RayReconstruction::evaluate(ID3D12GraphicsCommandList* commands, const Came
 	constants.clipToCameraView = matrix(XMMatrixInverse(nullptr, projection));
 	constants.clipToPrevClip = matrix(clipToPrevious);
 	constants.prevClipToClip = matrix(XMMatrixInverse(nullptr, clipToPrevious));
-	constants.jitterOffset = {jitter.x, jitter.y};
+	// Rays sample pixelCenter + jitter. Geometry therefore moves by -jitter
+	// in the input image, which is the projection offset expected by DLSS.
+	constants.jitterOffset = {-jitter.x, -jitter.y};
 	constants.mvecScale = {1.0f / float(mWidth), 1.0f / float(mHeight)};
 	constants.cameraPinholeOffset = {0,0};
 	constants.cameraPos = {pos.x,pos.y,pos.z};

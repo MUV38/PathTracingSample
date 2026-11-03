@@ -152,9 +152,27 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		}
 		commandLineMode = argumentCount > 1;
 		std::filesystem::path screenshotPath;
+		uint32_t screenshotCount = 1;
+		uint32_t capturedFrames = 0;
 		std::vector<std::wstring> sampleArguments;
 		for (int index = 1; index < argumentCount; ++index)
 		{
+			if (std::wstring_view(arguments.get()[index]) == L"--screenshot-count")
+			{
+				if (++index >= argumentCount)
+				{
+					throw std::runtime_error("--screenshot-count requires 1..256.");
+				}
+				const std::wstring value = arguments.get()[index];
+				size_t consumed = 0;
+				const auto count = std::stoul(value, &consumed);
+				if (consumed != value.size() || count < 1 || count > 256)
+				{
+					throw std::runtime_error("--screenshot-count requires 1..256.");
+				}
+				screenshotCount = static_cast<uint32_t>(count);
+				continue;
+			}
 			if (std::wstring_view(arguments.get()[index]) == L"--screenshot")
 			{
 				if (screenshotMode || ++index >= argumentCount || arguments.get()[index][0] == L'\0')
@@ -168,6 +186,10 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 			{
 				sampleArguments.emplace_back(arguments.get()[index]);
 			}
+		}
+		if (screenshotCount > 1 && !screenshotMode)
+		{
+			throw std::runtime_error("--screenshot-count requires --screenshot <output.png>.");
 		}
 		if (sample.mConfigure)
 		{
@@ -232,24 +254,35 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 			{
 				renderer.resize(state.mWidth, state.mHeight);
 				renderer.setMouseMotion(std::exchange(state.mMouseMotion, MouseMotion{0.0f, 0.0f, state.mRawMouseRegistered}));
-				const bool captureAndExit = screenshotMode && renderedFrames >= 2
-					&& (!sample.mReadyForScreenshot || sample.mReadyForScreenshot());
-				if (captureAndExit || state.mScreenshotRequested)
+				const bool captureFrame = screenshotMode && renderedFrames >= 2
+					&& (capturedFrames > 0 || !sample.mReadyForScreenshot || sample.mReadyForScreenshot());
+				if (captureFrame || state.mScreenshotRequested)
 				{
-					renderer.requestScreenshot(captureAndExit ? screenshotPath : std::filesystem::path{});
+					auto path = captureFrame ? screenshotPath : std::filesystem::path{};
+					if (captureFrame && screenshotCount > 1)
+					{
+						wchar_t suffix[16];
+						swprintf_s(suffix, L"-%04u", capturedFrames);
+						path = path.parent_path() / (path.stem().wstring() + suffix + path.extension().wstring());
+					}
+					renderer.requestScreenshot(path);
 					state.mScreenshotRequested = false;
 				}
 				renderer.render();
 				++renderedFrames;
-				if (captureAndExit)
+				if (captureFrame)
 				{
 					const int result = renderer.screenshotSucceeded() ? 0 : 1;
 					if (result != 0)
 					{
 						std::fprintf(stderr, "%s\n", renderer.screenshotStatus().c_str());
 					}
-					DestroyWindow(window);
-					return result;
+					++capturedFrames;
+					if (result != 0 || capturedFrames == screenshotCount)
+					{
+						DestroyWindow(window);
+						return result;
+					}
 				}
 			}
 		}

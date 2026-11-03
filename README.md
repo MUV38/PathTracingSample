@@ -159,6 +159,12 @@ GPU読み戻し後、Windows標準のWICでPNGを保存します。
 UsdKitchenで蓄積後に確認する場合は `--samples 128` などを併用すると、指定数以上のサンプルが蓄積するまで待ってから撮影します。
 相対パスはカレントディレクトリ基準で、必要な親フォルダを作成し、既存ファイルは上書きします。
 
+`--screenshot-count 16` を併用すると、撮影開始後の連続した16描画フレームを `rr-0000.png` ～ `rr-0015.png` のように保存して終了します。指定範囲は1～256で、1枚の場合は従来どおり指定したファイル名を使います。PNG保存中は描画が待つため、実時間のFPS計測用には使わないでください。
+
+```powershell
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --rr --samples 128 --spp 1 --screenshot-count 16 --screenshot build/checks/rr.png
+```
+
 ```powershell
 $app = Start-Process -FilePath .\build\x64\Release\DxrCube\DxrCube.exe -ArgumentList '--screenshot "build/checks/dxr-cube.png"' -PassThru -Wait
 $app.ExitCode
