@@ -24,6 +24,15 @@ struct LightReservoir
 };
 static const uint environmentLightIndex = 0xffffffffu;
 static const uint rectangleLightIndex = 0xfffffffeu;
+// The 32 rectangle slots occupy the range immediately below the sentinel.
+bool isRectangleSample(uint index)
+{
+	return index <= rectangleLightIndex && index > rectangleLightIndex - 32u;
+}
+uint rectangleSampleIndex(uint index)
+{
+	return rectangleLightIndex - index;
+}
 uint reservoirLightTypeCount(bool environmentEnabled, bool meshEnabled, bool rectangleEnabled)
 {
 	return uint(environmentEnabled) + uint(meshEnabled) + uint(rectangleEnabled);

@@ -49,6 +49,10 @@ foreach ($mode in @("off", "spatial"))
 	$cases += @{ Name="mesh-" + $mode; Model="mesh/multiple"; Options="--restir $mode --rect-position 0 2.8 0 --rect-size 1 1 --rect-radiance 4 --samples 1024" }
 	$cases += @{ Name="all-" + $mode; Model="mesh/multiple"; Options="--restir $mode --rect-position 0 2.8 0 --rect-size 1 1 --rect-radiance 4 --ibl-intensity 1 --samples 1024" }
 }
+$multiple = "--rect-position -0.8 2.2 0 --rect-size 0.5 1 --rect-color 1 0.2 0.1 --rect-radiance 12 --add-rect-light --rect-position 0.8 1.8 0 --rect-size 1 0.5 --rect-color 0.1 0.4 1 --rect-radiance 5 --add-rect-light --no-rect-light --rect-position 0 0.5 0 --rect-radiance 10000 --rect-index 0"
+$cases += @{ Name="multi-mis"; Model="rectangle-shadow"; Options=$multiple + " --spp 16 --samples 8192" }
+$cases += @{ Name="multi-bsdf"; Model="rectangle-shadow"; Options=$multiple + " --spp 16 --samples 8192 --no-rect-mis" }
+$cases += @{ Name="multi-spatial"; Model="rectangle-shadow"; Options=$multiple + " --restir spatial --samples 1024" }
 Add-Type -AssemblyName System.Drawing
 $summary = @()
 foreach ($case in $cases)
@@ -74,6 +78,8 @@ foreach ($case in $cases)
 		$bright = 0
 		$lit = 0
 		$sum = 0.0
+		$sumGreen = 0.0
+		$sumBlue = 0.0
 		$count = 0
 		for ($y = 0; $y -lt $bitmap.Height; $y += 2)
 		{
@@ -81,6 +87,8 @@ foreach ($case in $cases)
 			{
 				$pixel = $bitmap.GetPixel($x, $y)
 				$sum += $pixel.R
+				$sumGreen += $pixel.G
+				$sumBlue += $pixel.B
 				$count++
 				if ($pixel.R -gt 10)
 				{
@@ -104,7 +112,7 @@ foreach ($case in $cases)
 		{
 			throw "The back of the rectangle must not emit."
 		}
-		$summary += [pscustomobject]@{ Name=$case.Name; Mean=$sum/$count; LitSamples=$lit; BrightSamples=$bright; Png=$png }
+		$summary += [pscustomobject]@{ Name=$case.Name; Mean=$sum/$count; MeanGreen=$sumGreen/$count; MeanBlue=$sumBlue/$count; LitSamples=$lit; BrightSamples=$bright; Png=$png }
 		Write-Output ($case.Name + ": exit 0, image passed")
 	}
 	finally
@@ -147,3 +155,16 @@ foreach ($name in @("ibl", "mesh", "all"))
 	}
 }
 Write-Output "ReSTIR rectangle and mixed light checks passed."
+foreach ($name in @("multi-bsdf", "multi-spatial"))
+{
+	$baseline = $summary | Where-Object Name -eq "multi-mis"
+	$result = $summary | Where-Object Name -eq $name
+	foreach ($channel in @("Mean", "MeanGreen", "MeanBlue"))
+	{
+		if ([Math]::Abs($baseline.$channel - $result.$channel) -gt 1)
+		{
+			throw ("Multiple rectangle MIS / BSDF mean differs: " + $name + " " + $channel)
+		}
+	}
+}
+Write-Output "Multiple rectangle MIS / BSDF / ReSTIR and disabled-slot checks passed."

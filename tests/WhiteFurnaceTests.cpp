@@ -590,6 +590,64 @@ void checkRestirLighting(const std::filesystem::path& directory, bool warp, bool
 		std::cout << "Light ReSTIR checks passed: " << tests.size() << " cases, rectangle=" << includeRectangle << ", variant=" << variant << ".\n";
 	}
 }
+void checkMultipleRectangles(const std::filesystem::path& directory, bool warp)
+{
+	std::vector<Test> tests;
+	const double formFactor = 4 / 3.141592653589793 * (0.5 / std::sqrt(1.25)) * std::atan(0.5 / std::sqrt(1.25));
+	for (unsigned count : {2u, 32u})
+	{
+		for (float noV : {1.0f, 0.1f})
+		{
+			for (bool absorber : {false, true})
+			{
+				for (uint32_t mode = 0; mode < 4; ++mode)
+				{
+					CaseData data{{0.2f,0.5f,0.8f}, 0, 0.6f, 0, noV, 32768u | (mode << 9u) | (count == 32 ? 65536u : 0u)};
+					if (absorber)
+					{
+						data.mBaseColor = {0,0,0};
+					}
+					std::array<float,3> expected{};
+					for (unsigned i = count == 32 ? 2u : 0u; i < count; ++i)
+					{
+						const std::array<float,3> color = i % 2 == 0 ? std::array<float,3>{1,0.2f,0.1f} : std::array<float,3>{0.1f,0.5f,1};
+						for (size_t axis = 0; axis < 3; ++axis)
+						{
+							expected[axis] += static_cast<float>(data.mBaseColor[axis] * color[axis] * formFactor);
+						}
+					}
+					tests.push_back({data, "multiple-rectangles", expected});
+				}
+			}
+		}
+	}
+	const auto results = integrate(tests, warp);
+	std::ofstream csv(directory / L"multiple-rectangles.csv");
+	csv << "case,channel,mean,expected,standard_error,pass\n" << std::setprecision(9);
+	size_t failures = 0;
+	for (size_t index = 0; index < tests.size(); ++index)
+	{
+		for (size_t axis = 0; axis < 3; ++axis)
+		{
+			const auto& result = results[index];
+			const double expected = (*tests[index].mExpected)[axis];
+			const double error = std::sqrt(result.mVariance[axis] / sampleCount);
+			const bool pass = result.mInvalid == 0 && std::isfinite(result.mMean[axis]) && std::isfinite(error)
+				&& std::abs(result.mMean[axis] - expected) <= 0.0005 + 6 * error;
+			csv << index << ',' << axis << ',' << result.mMean[axis] << ',' << expected << ',' << error << ',' << pass << '\n';
+			if (!pass)
+			{
+				++failures;
+			}
+		}
+	}
+	csv.close();
+	if (!csv || failures)
+	{
+		throw std::runtime_error("Multiple rectangle checks failed; inspect multiple-rectangles.csv.");
+	}
+	std::cout << "Multiple rectangle checks passed: " << tests.size() << " cases.\n";
+}
 void writeRectangleFixtures(const std::filesystem::path& directory)
 {
 	SceneData scene;
@@ -623,6 +681,8 @@ void writeRectangleFixtures(const std::filesystem::path& directory)
 	quad({0.4f,0,-0.4f}, {0.4f,0,0.4f}, {0.4f,1,0.4f}, {0.4f,1,-0.4f}, {1,0,0});
 	scene.mMeshlets = {{0,0,static_cast<uint32_t>(scene.mVertices.size()),static_cast<uint32_t>(scene.mMeshletTriangles.size() / 3)}};
 	writeSceneFile(directory / L"rectangle-shadow.ptscene", scene);
+	scene.mMaterials[0].mBaseColor = {0,0,0};
+	writeSceneFile(directory / L"rectangle-shadow-mask.ptscene", scene);
 }
 void writeFixtures(const std::filesystem::path& directory)
 {
@@ -736,6 +796,7 @@ int wmain(int count, wchar_t** arguments)
 		checkRestir(directory, count == 3);
 		checkRestirLighting(directory, count == 3, false);
 		checkRestirLighting(directory, count == 3, true);
+		checkMultipleRectangles(directory, count == 3);
 		return 0;
 	}
 	catch (const std::exception& error)

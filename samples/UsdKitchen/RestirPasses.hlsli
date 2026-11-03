@@ -16,7 +16,7 @@ Surface primaryBsdf(PrimarySurface primary)
 uint restirLightTypeCount()
 {
 	return reservoirLightTypeCount(environmentMis != 0 && environmentIntensity > 0,
-		meshLightCount > 0 && emissiveMis != 0, rectangle.enabled != 0 && rectangle.mis != 0);
+		meshLightCount > 0 && emissiveMis != 0, sampledRectangleCount > 0);
 }
 float restirEnvironmentSampleRatio()
 {
@@ -32,9 +32,9 @@ float3 reservoirIntegrand(Surface surface, float3 view, LightReservoir lightSamp
 		float3 direction = decodeEnvironmentSample(lightSample.uv);
 		return evaluateEnvironmentReservoirSample(surface, view, direction, sampleEnvironment(direction), lightSample.proposalPdf * restirEnvironmentSampleRatio());
 	}
-	if (lightSample.lightIndex == rectangleLightIndex)
+	if (isRectangleSample(lightSample.lightIndex))
 	{
-		return evaluateRectangleReservoirSample(surface, view, rectangle, lightSample.uv);
+		return evaluateRectangleReservoirSample(surface, view, rectangles[rectangleSampleIndex(lightSample.lightIndex)], lightSample.uv);
 	}
 	return evaluateReservoirSample(surface, view, meshLights[lightSample.lightIndex], lightSample.uv);
 }
@@ -45,9 +45,10 @@ float reservoirProposalPdf(LightReservoir lightSample)
 	{
 		return typeProbability * lightSample.proposalPdf;
 	}
-	if (lightSample.lightIndex == rectangleLightIndex)
+	if (isRectangleSample(lightSample.lightIndex))
 	{
-		return typeProbability / (rectangle.width * rectangle.height);
+		RectangleLight light = rectangles[rectangleSampleIndex(lightSample.lightIndex)];
+		return typeProbability * light.selectionPdf / (light.width * light.height);
 	}
 	return typeProbability * meshLights[lightSample.lightIndex].areaDensity;
 }
@@ -101,7 +102,7 @@ void prepareRestir(uint2 pixel, uint state)
 			payload.hit = 0;
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 			float rectangleDistance;
-			bool rectangleHit = intersectRectangle(rectangle, ray.Origin, ray.Direction, ray.TMin, ray.TMax, rectangleDistance);
+			bool rectangleHit = nearestRectangle(ray, rectangleDistance) < rectangleCount;
 			if (payload.hit != 0 && (!rectangleHit || rectangleDistance > dot(payload.position - ray.Origin, ray.Direction)))
 			{
 				primary.valid = 1;
@@ -120,7 +121,7 @@ void prepareRestir(uint2 pixel, uint state)
 				// Independent of path sampling and accumulation resets while moving.
 				state = address ^ ((restirFrame + 1u) * 0xa511e9b3u);
 				bool environmentEnabled = environmentMis != 0 && environmentIntensity > 0;
-				bool rectangleEnabled = rectangle.enabled != 0 && rectangle.mis != 0;
+				bool rectangleEnabled = sampledRectangleCount > 0;
 				uint typeCount = restirLightTypeCount();
 				if (restirMode > 0 && typeCount > 0 && maxBounces > 0 && meshletColors < 0.5f)
 				{
@@ -141,7 +142,7 @@ void prepareRestir(uint2 pixel, uint state)
 						{
 							if (rectangleEnabled && type == typeCount - 1u)
 							{
-								candidate.lightIndex = rectangleLightIndex;
+								candidate.lightIndex = rectangleLightIndex - sampleRectangleIndex(random(state));
 							}
 							else
 							{
@@ -215,9 +216,9 @@ float3 restirLighting(Surface surface, float3 view, uint2 pixel)
 		return maxComponent(value) > 0 && visibleToEnvironment(surface, decodeEnvironmentSample(reservoir.uv)) ? value * reservoir.weight : 0;
 	}
 	float3 lightPoint;
-	if (reservoir.lightIndex == rectangleLightIndex)
+	if (isRectangleSample(reservoir.lightIndex))
 	{
-		lightPoint = sampleRectanglePoint(rectangle, reservoir.uv);
+		lightPoint = sampleRectanglePoint(rectangles[rectangleSampleIndex(reservoir.lightIndex)], reservoir.uv);
 	}
 	else
 	{

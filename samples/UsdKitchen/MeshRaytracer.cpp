@@ -60,6 +60,21 @@ ComPtr<ID3D12Resource> uploadBuffer(ID3D12Device* device, const void* data, size
 	return buffer;
 }
 
+struct RectangleConstants
+{
+	DirectX::XMFLOAT3 mPosition{};
+	uint32_t mEnabled = 0;
+	DirectX::XMFLOAT3 mU{};
+	float mWidth = 1;
+	DirectX::XMFLOAT3 mV{};
+	float mHeight = 1;
+	std::array<float,3> mRadiance{};
+	uint32_t mMis = 1;
+	float mSelectionPdf = 0;
+	float mCdf = 0;
+	std::array<float,2> mPadding{};
+};
+static_assert(sizeof(RectangleConstants) == 80);
 struct SceneConstants
 {
 	DirectX::XMFLOAT3 mPosition;
@@ -88,14 +103,10 @@ struct SceneConstants
 	float mEnvironmentRotation = 0.0f;
 	uint32_t mEnvironmentMis = 1;
 	std::array<float, 2> mPadding2{};
-	DirectX::XMFLOAT3 mRectanglePosition;
-	uint32_t mRectangleEnabled = 0;
-	DirectX::XMFLOAT3 mRectangleU;
-	float mRectangleWidth = 1;
-	DirectX::XMFLOAT3 mRectangleV;
-	float mRectangleHeight = 1;
-	std::array<float, 3> mRectangleRadiance{};
-	uint32_t mRectangleMis = 1;
+	uint32_t mRectangleCount = 0;
+	uint32_t mSampledRectangleCount = 0;
+	std::array<float,2> mRectanglePadding{};
+	std::array<RectangleConstants, Lighting::maximumRectangles> mRectangles{};
 	uint32_t mMeshLightCount = 0;
 	uint32_t mEmissiveMis = 1;
 	uint32_t mMultipleScattering = 1;
@@ -110,7 +121,7 @@ struct SceneConstants
 	float mPreviousViewportLeft = 0;
 	std::array<float,3> mPreviousCameraPadding{};
 };
-static_assert(sizeof(SceneConstants) == 368);
+static_assert(sizeof(SceneConstants) == 2880);
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -132,7 +143,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_COPY_DEST);
 	check(renderer.commandQueue()->GetTimestampFrequency(&mTimestampFrequency), "Read GPU timestamp frequency");
 	mGgxEnergy = uploadBuffer(mDevice.Get(), ggxEnergyLut.data(), sizeof(ggxEnergyLut));
-	mConstants = createBuffer(mDevice.Get(), 512, D3D12_HEAP_TYPE_UPLOAD,
+	mConstants = createBuffer(mDevice.Get(), (sizeof(SceneConstants) + 255) & ~size_t(255), D3D12_HEAP_TYPE_UPLOAD,
 		D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ);
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -645,34 +656,65 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRestirDebug = tracing.mRestirDebug;
 	const bool needsPrimaryData = constants.mRestirMode > 0 || constants.mRestirDebug > 0;
 	resizeRestir(needsPrimaryData ? static_cast<size_t>(mWidth) * mHeight : 1);
-	const auto& rectangle = lighting.mRectangle;
-	if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
-		|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
-		|| !std::isfinite(rectangle.mAzimuth) || !std::isfinite(rectangle.mElevation)
-		|| !std::isfinite(rectangle.mPosition.x) || !std::isfinite(rectangle.mPosition.y) || !std::isfinite(rectangle.mPosition.z)
-		|| !std::isfinite(rectangle.mRadiance) || rectangle.mRadiance < 0 || rectangle.mRadiance > 10000)
+	if (lighting.mRectangleCount > Lighting::maximumRectangles)
 	{
-		throw std::runtime_error("Invalid rectangle light settings.");
+		throw std::runtime_error("At most 32 rectangle lights are supported.");
 	}
-	const float rectAzimuth = DirectX::XMConvertToRadians(rectangle.mAzimuth);
-	const float rectElevation = DirectX::XMConvertToRadians(rectangle.mElevation);
-	const auto normal = DirectX::XMVectorSet(std::cos(rectElevation) * std::sin(rectAzimuth), std::sin(rectElevation),
-		std::cos(rectElevation) * std::cos(rectAzimuth), 0);
-	const auto axisU = DirectX::XMVectorSet(std::cos(rectAzimuth), 0, -std::sin(rectAzimuth), 0);
-	DirectX::XMStoreFloat3(&constants.mRectangleU, axisU);
-	DirectX::XMStoreFloat3(&constants.mRectangleV, DirectX::XMVector3Cross(normal, axisU));
-	constants.mRectanglePosition = rectangle.mPosition;
-	constants.mRectangleWidth = rectangle.mWidth;
-	constants.mRectangleHeight = rectangle.mHeight;
-	constants.mRectangleEnabled = rectangle.mEnabled ? 1u : 0u;
-	constants.mRectangleMis = rectangle.mMis ? 1u : 0u;
-	for (size_t channel = 0; channel < 3; ++channel)
+	constants.mRectangleCount = static_cast<uint32_t>(lighting.mRectangleCount);
+	std::array<double, Lighting::maximumRectangles> rectangleWeights{};
+	double totalRectangleWeight = 0;
+	for (size_t index = 0; index < lighting.mRectangleCount; ++index)
 	{
-		if (!std::isfinite(rectangle.mColor[channel]) || rectangle.mColor[channel] < 0 || rectangle.mColor[channel] > 1)
+		const auto& rectangle = lighting.mRectangles[index];
+		auto& gpu = constants.mRectangles[index];
+		if (!std::isfinite(rectangle.mWidth) || !std::isfinite(rectangle.mHeight)
+			|| rectangle.mWidth < 0.01f || rectangle.mWidth > 100 || rectangle.mHeight < 0.01f || rectangle.mHeight > 100
+			|| !std::isfinite(rectangle.mAzimuth) || !std::isfinite(rectangle.mElevation)
+			|| !std::isfinite(rectangle.mPosition.x) || !std::isfinite(rectangle.mPosition.y) || !std::isfinite(rectangle.mPosition.z)
+			|| !std::isfinite(rectangle.mRadiance) || rectangle.mRadiance < 0 || rectangle.mRadiance > 10000)
 		{
-			throw std::runtime_error("Invalid rectangle light color.");
+			throw std::runtime_error("Invalid rectangle light settings.");
 		}
-		constants.mRectangleRadiance[channel] = rectangle.mColor[channel] * rectangle.mRadiance;
+		const float rectAzimuth = DirectX::XMConvertToRadians(rectangle.mAzimuth);
+		const float rectElevation = DirectX::XMConvertToRadians(rectangle.mElevation);
+		const auto normal = DirectX::XMVectorSet(std::cos(rectElevation) * std::sin(rectAzimuth), std::sin(rectElevation),
+			std::cos(rectElevation) * std::cos(rectAzimuth), 0);
+		const auto axisU = DirectX::XMVectorSet(std::cos(rectAzimuth), 0, -std::sin(rectAzimuth), 0);
+		DirectX::XMStoreFloat3(&gpu.mU, axisU);
+		DirectX::XMStoreFloat3(&gpu.mV, DirectX::XMVector3Cross(normal, axisU));
+		gpu.mPosition = rectangle.mPosition;
+		gpu.mWidth = rectangle.mWidth;
+		gpu.mHeight = rectangle.mHeight;
+		gpu.mEnabled = rectangle.mEnabled ? 1u : 0u;
+		gpu.mMis = lighting.mRectangleMis ? 1u : 0u;
+		for (size_t channel = 0; channel < 3; ++channel)
+		{
+			if (!std::isfinite(rectangle.mColor[channel]) || rectangle.mColor[channel] < 0 || rectangle.mColor[channel] > 1)
+			{
+				throw std::runtime_error("Invalid rectangle light color.");
+			}
+			gpu.mRadiance[channel] = rectangle.mColor[channel] * rectangle.mRadiance;
+		}
+		if (rectangle.mEnabled && lighting.mRectangleMis)
+		{
+			rectangleWeights[index] = double(rectangle.mWidth) * rectangle.mHeight
+				* (0.2126 * gpu.mRadiance[0] + 0.7152 * gpu.mRadiance[1] + 0.0722 * gpu.mRadiance[2]);
+			totalRectangleWeight += rectangleWeights[index];
+		}
+	}
+	double cumulativeWeight = 0;
+	float previousCdf = 0;
+	for (size_t index = 0; index < lighting.mRectangleCount; ++index)
+	{
+		auto& gpu = constants.mRectangles[index];
+		cumulativeWeight += rectangleWeights[index];
+		gpu.mCdf = totalRectangleWeight > 0 ? static_cast<float>(cumulativeWeight / totalRectangleWeight) : 0;
+		gpu.mSelectionPdf = gpu.mCdf - previousCdf;
+		previousCdf = gpu.mCdf;
+		if (gpu.mSelectionPdf > 0)
+		{
+			++constants.mSampledRectangleCount;
+		}
 	}
 	// History camera data changes every frame and must not reset accumulation.
 	constexpr size_t integratorSize = offsetof(SceneConstants, mHistoryValid);

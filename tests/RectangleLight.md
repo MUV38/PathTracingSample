@@ -7,7 +7,7 @@
 .\tests\RunRectangleLight.ps1 -Configuration Release
 ```
 
-`WhiteFurnaceTests` の既存BRDF・MIS・Reservoirテストに加え、矩形を含む160条件を検査し、自作の床・遮蔽物・鏡モデルと白色HDRを生成して、UsdKitchenで25種類の画像を撮影します。
+`WhiteFurnaceTests` の既存BRDF・MIS・Reservoirテストに加え、矩形を含む160条件と複数矩形32条件を検査し、自作の床・遮蔽物・鏡モデルと白色HDRを生成して、UsdKitchenで28種類の画像を撮影します。
 出力先はGit管理外の `build/checks/rectangle-<構成>/` です。`-OutputDirectory` で変更できます。
 数値検証はDirectX 12 / SM6.0、表示はDXR Tier 1.1を使います。追加ソフトウェアやUSD SDKは不要です。
 数値テストだけなら `WhiteFurnaceTests.exe <出力先> --warp` でWARPも使えます。
@@ -33,6 +33,9 @@
 | オプション | 内容 |
 | --- | --- |
 | --rect-light | 矩形を有効化。既定は無効 |
+| --add-rect-light | 新しい有効なスロットを追加して選択。最大32スロット |
+| --rect-index index | 編集対象の既存スロットを選択（0始まり） |
+| --no-rect-light | 選択スロットを無効化 |
 | --rect-position x y z | 中心位置（m）、各値-100000～100000。既定0, 2.5, 0 |
 | --rect-size width height | 幅・高さ（m）、0.01～100。既定1×1 |
 | --rect-orientation azimuth elevation | 方位角-180～180度、仰角-90～90度。既定0, -90（下向き） |
@@ -44,13 +47,14 @@
 不透明な両面の遮蔽物ですが、発光するのは法線側だけです。BRDF反射や透過は持ちません。
 IBLは従来の設定で併用できます。通常のNEE / MISではIBLと矩形をそれぞれ1サンプル評価し、各光源へ到達したBRDF経路とのMISを別々に計算します。
 反射回数上限では矩形NEEも打ち切りますが、そこまでに到達した発光面は表示します。
-発光メッシュのNEE/MISは [別のテスト](EmissiveLights.md) で検証します。複数の解析的な矩形ライトとUSDライトの取り込みは未対応です。
+発光メッシュのNEE/MISは [別のテスト](EmissiveLights.md) で検証します。解析的な矩形ライトは最大32灯で、USDライトの取り込みは未対応です。
 
 ## ReSTIR DI
 
 `--restir ris|temporal|spatial` を併用すると一次ヒットの矩形照明をReservoirで評価します。矩形・IBL・発光メッシュの有効な種別から均等に選び、1フレーム合計8候補です。矩形だけの場合も動作します。二次ヒット以降は通常のNEE / MISです。
 
 スクリプトは通常の9画像に加え、RIS・時間・空間再利用、大小ライト・鏡・表裏の空間再利用、矩形＋IBL・矩形＋メッシュ・3種併用を撮影します。NEE / MISとの赤平均値を画像右60%以降で2画素間隔で測り、±1以内を要求します。表示変換後の回帰比較なので、線形の不偏性は別途数値テストで検査します。
+色・縦横比・放射輝度が異なる2灯と無効な1スロットのモデルも、NEE / MIS・BSDF単独（各8192サンプル・16 SPP）・ReSTIR spatial（1024サンプル）で比較します。無効なスロットは大きな放射輝度を設定しても選択・遮蔽に影響しないことを検査し、RGB各平均差を±1以内とします。
 
 数値テストは矩形単独／メッシュ併用×IBL有無×5マテリアル×2視線角×4方式の160条件です。各131,072サンプルで、Lambertと吸収体は解析解、他は1候補の平均値と6標準誤差を使って比較し、鏡のdelta寄与・異なる法線からの統合と候補数制限も確認します。
 結果は `restir-rectangle.csv` と `restir-rectangle-environment.csv` です。この積分テストでは各光源を独立した未遮蔽の積分対象とし、Lambertの基準値は `Base Color × (IBL有無 + 有限光源数 × 矩形の形態係数)` とします。実際の遮蔽はPNGで別に確認します。
@@ -58,3 +62,5 @@ IBLは従来の設定で併用できます。通常のNEE / MISではIBLと矩�
 候補の保存形式は32バイトのままで、矩形のindexと面上のUVを保持します。矩形の片面発光と最終サンプルの遮蔽を評価し、次の非delta BSDFヒットは発光寄与を0にして二重計上を防ぎます。直接見える矩形と完全鏡への映り込みは維持します。`--no-rect-mis` では矩形候補とこの抑制をともに無効にします。
 
 参考: [PBRT Area Lights](https://pbr-book.org/4ed/Light_Sources/Area_Lights)、[PBRT A Better Path Tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer)
+
+複数灯の数値・画像・GPU時間比較は [MultipleRectangles](MultipleRectangles.md) を参照してください。通常NEEもCDFから1灯を選び、光源選択確率を含むMISを使います。
