@@ -21,6 +21,23 @@ std::filesystem::path screenshotDirectory()
 	return executableDirectory() / L"screenshots";
 }
 
+std::filesystem::path pixCaptureDirectory()
+{
+	return executableDirectory() / L"captures";
+}
+
+struct PixFrameCapture
+{
+	bool mActive = false;
+	~PixFrameCapture()
+	{
+		if (mActive)
+		{
+			PIXEndCapture(TRUE);
+		}
+	}
+};
+
 void check(HRESULT result, const char* operation)
 {
 	if (FAILED(result))
@@ -275,6 +292,26 @@ void Renderer::drawGui()
 		const float frameRate = ImGui::GetIO().Framerate;
 		ImGui::Text("%.1f FPS (%.3f ms/frame)", frameRate, frameRate > 0.0f ? 1000.0f / frameRate : 0.0f);
 		ImGui::Separator();
+		if (ImGui::CollapsingHeader("PIX GPU capture", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			const bool available = GetModuleHandleW(L"WinPixGpuCapturer.dll") != nullptr;
+			ImGui::Text("Capture layer: %s", available ? "loaded / ready to attach" : "not loaded");
+			ImGui::BeginDisabled(!available);
+			ImGui::Checkbox("Open in PIX after saving", &mPixOpenAfterSave);
+			if (ImGui::Button("Capture next frame (.wpix)"))
+			{
+				requestPixCapture({}, mPixOpenAfterSave);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::Button("Open PIX capture folder"))
+			{
+				openDirectory(pixCaptureDirectory(), mPixCaptureStatus);
+			}
+			const auto directory = pixCaptureDirectory().u8string();
+			ImGui::TextWrapped("Folder: %s", reinterpret_cast<const char*>(directory.c_str()));
+			ImGui::TextWrapped("%s", mPixCaptureStatus.c_str());
+			ImGui::Separator();
+		}
 		if (mSample->mDrawGui)
 		{
 			mSample->mDrawGui();
@@ -354,6 +391,25 @@ void Renderer::render()
 {
 	PIXScopedEvent(PIX_COLOR(70, 130, 220), "Frame / CPU");
 	drawGui();
+	const auto pixPath = std::exchange(mPixCapturePath, {});
+	const bool openPix = std::exchange(mPixOpenRequested, false);
+	PixFrameCapture pixCapture;
+	if (!pixPath.empty())
+	{
+		try
+		{
+			std::filesystem::create_directories(pixPath.parent_path());
+			waitForGpu();
+			PIXCaptureParameters parameters{};
+			parameters.GpuCaptureParameters.FileName = pixPath.c_str();
+			check(PIXBeginCapture(PIX_CAPTURE_GPU, &parameters), "PIXBeginCapture");
+			pixCapture.mActive = true;
+		}
+		catch (const std::exception& error)
+		{
+			mPixCaptureStatus = std::string("PIX capture failed: ") + error.what();
+		}
+	}
 	const auto screenshotPath = std::exchange(mScreenshotPath, {});
 	Screenshot screenshot;
 	bool screenshotRecorded = false;
@@ -419,6 +475,43 @@ void Renderer::render()
 	// One frame in flight keeps allocator/resource lifetime explicit at this first milestone.
 	waitForGpu();
 	check(presentResult, "Present");
+	if (pixCapture.mActive)
+	{
+		const HRESULT result = PIXEndCapture(FALSE);
+		pixCapture.mActive = false;
+		try
+		{
+			check(result, "PIXEndCapture");
+			if (!std::filesystem::is_regular_file(pixPath) || std::filesystem::file_size(pixPath) == 0)
+			{
+				throw std::runtime_error("Capture file was not saved.");
+			}
+			mPixCaptureSucceeded = true;
+			const auto filename = pixPath.filename().u8string();
+			mPixCaptureStatus = "Saved: " + std::string(filename.begin(), filename.end());
+			if (openPix)
+			{
+				const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+				if (comResult != RPC_E_CHANGED_MODE)
+				{
+					check(comResult, "Initialize COM for opening PIX");
+				}
+				const auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(mWindow, L"open", pixPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+				if (SUCCEEDED(comResult))
+				{
+					CoUninitialize();
+				}
+				if (opened <= 32)
+				{
+					mPixCaptureStatus += ". Could not open PIX (ShellExecute error " + std::to_string(opened) + ").";
+				}
+			}
+		}
+		catch (const std::exception& error)
+		{
+			mPixCaptureStatus = std::string("PIX capture failed: ") + error.what();
+		}
+	}
 	if (screenshotRecorded)
 	{
 		try
@@ -455,9 +548,43 @@ void Renderer::requestScreenshot(const std::filesystem::path& path)
 
 void Renderer::openScreenshotDirectory()
 {
+	openDirectory(screenshotDirectory(), mScreenshotStatus);
+}
+
+void Renderer::requestPixCapture(const std::filesystem::path& path, bool openInPix)
+{
+	mPixCaptureSucceeded = false;
+	if (!GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+	{
+		mPixCaptureStatus = "Capture layer is not loaded. Restart with --pix or launch through PIX.";
+		return;
+	}
+	if (!mPixCapturePath.empty())
+	{
+		return;
+	}
+	mPixOpenRequested = openInPix;
+	if (!path.empty())
+	{
+		mPixCapturePath = std::filesystem::absolute(path);
+	}
+	else
+	{
+		SYSTEMTIME time{};
+		GetLocalTime(&time);
+		wchar_t filename[128]{};
+		swprintf_s(filename, L"pix-%04u%02u%02u-%02u%02u%02u-%03u-%lu.wpix",
+			time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond,
+			time.wMilliseconds, GetCurrentProcessId());
+		mPixCapturePath = pixCaptureDirectory() / filename;
+	}
+	mPixCaptureStatus = "Capture requested.";
+}
+
+void Renderer::openDirectory(const std::filesystem::path& directory, std::string& status)
+{
 	try
 	{
-		const auto directory = screenshotDirectory();
 		std::filesystem::create_directories(directory);
 		const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 		if (comResult != RPC_E_CHANGED_MODE)
@@ -473,11 +600,11 @@ void Renderer::openScreenshotDirectory()
 		{
 			throw std::runtime_error("Cannot open the screenshot folder (ShellExecute error " + std::to_string(result) + ").");
 		}
-		mScreenshotStatus = "Opened screenshot folder.";
+		status = "Opened folder.";
 	}
 	catch (const std::exception& error)
 	{
-		mScreenshotStatus = std::string("Open folder failed: ") + error.what();
-		OutputDebugStringA(mScreenshotStatus.c_str());
+		status = std::string("Open folder failed: ") + error.what();
+		OutputDebugStringA(status.c_str());
 	}
 }

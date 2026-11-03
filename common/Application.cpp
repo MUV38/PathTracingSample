@@ -155,11 +155,18 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		std::filesystem::path screenshotPath;
 		std::filesystem::path pixCapturePath;
 		bool enablePix = false;
+		bool disablePix = false;
+		std::string pixStartupStatus;
 		uint32_t screenshotCount = 1;
 		uint32_t capturedFrames = 0;
 		std::vector<std::wstring> sampleArguments;
 		for (int index = 1; index < argumentCount; ++index)
 		{
+			if (std::wstring_view(arguments.get()[index]) == L"--no-pix")
+			{
+				disablePix = true;
+				continue;
+			}
 			if (std::wstring_view(arguments.get()[index]) == L"--pix")
 			{
 				enablePix = true;
@@ -218,15 +225,31 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		{
 			throw std::runtime_error("--pix-capture supports a single screenshot, not a screenshot burst.");
 		}
-		if (enablePix && !GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+		if (enablePix && disablePix)
+		{
+			throw std::runtime_error("--no-pix cannot be combined with --pix or --pix-capture.");
+		}
+		if (!disablePix && !GetModuleHandleW(L"WinPixGpuCapturer.dll"))
 		{
 			// Load before sample configuration: Streamline may invoke graphics APIs there.
 			// Keep the capture layer loaded for the process lifetime; sample graphics
 			// objects can outlive runSample().
 			if (!PIXLoadLatestWinPixGpuCapturerLibrary())
 			{
-				throw std::runtime_error("PIX GPU capture layer could not be loaded. Install PIX for Windows or launch through PIX.");
+				pixStartupStatus = "PIX capture layer could not load (Windows error " + std::to_string(GetLastError()) + "). Install PIX and restart, or launch through PIX.";
+				if (enablePix)
+				{
+					throw std::runtime_error(pixStartupStatus);
+				}
 			}
+		}
+		if (GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+		{
+			pixStartupStatus = "Ready. Save a frame here or attach PIX to this process.";
+		}
+		else if (disablePix)
+		{
+			pixStartupStatus = "PIX auto-loading disabled by --no-pix. Restart without that option to enable capture.";
 		}
 		if (sample.mConfigure)
 		{
@@ -268,6 +291,7 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 
 		Renderer renderer;
 		renderer.initialize(window, state.mWidth, state.mHeight, sample);
+		renderer.setPixStartupStatus(pixStartupStatus);
 		const std::wstring title = std::wstring(sample.mName) + L" | DirectX 12 | " + renderer.adapterName() +
 			(renderer.supportsRaytracing() ? L" | DXR supported" : L" | DXR unavailable");
 		SetWindowTextW(window, title.c_str());
@@ -297,13 +321,7 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 					&& (!sample.mReadyForScreenshot || sample.mReadyForScreenshot());
 				if (capturePixFrame)
 				{
-					renderer.waitForGpu();
-					PIXCaptureParameters parameters{};
-					parameters.GpuCaptureParameters.FileName = pixCapturePath.c_str();
-					if (FAILED(PIXBeginCapture(PIX_CAPTURE_GPU, &parameters)))
-					{
-						throw std::runtime_error("PIXBeginCapture failed.");
-					}
+					renderer.requestPixCapture(pixCapturePath);
 				}
 				if (captureFrame || state.mScreenshotRequested)
 				{
@@ -321,11 +339,9 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 				++renderedFrames;
 				if (capturePixFrame)
 				{
-					renderer.waitForGpu();
-					if (FAILED(PIXEndCapture(FALSE)) || !std::filesystem::is_regular_file(pixCapturePath)
-						|| std::filesystem::file_size(pixCapturePath) == 0)
+					if (!renderer.pixCaptureSucceeded())
 					{
-						throw std::runtime_error("PIXEndCapture failed to save a GPU capture.");
+						throw std::runtime_error(renderer.pixCaptureStatus());
 					}
 					if (!captureFrame)
 					{

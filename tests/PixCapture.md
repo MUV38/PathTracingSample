@@ -13,8 +13,19 @@ PIX本体とGPUキャプチャ層はこのNuGetとは別です。このプロジ
 ## 起動方法
 
 - PIXのLaunchから実行ファイルを起動すれば、そのままGPU Captureを使用できます。
-- Visual Studioやコマンドラインから起動してPIXを接続する場合は `--pix` を指定します。インストール済みPIXの最新キャプチャ層を、Streamlineの設定やDirectX API呼び出しより前に読み込みます。
+- 通常起動でも、インストール済みPIXの最新キャプチャ層をStreamlineの設定やDirectX API呼び出しより前に読み込みます。見つからない場合は描画を継続し、ImGuiに理由を表示します。明示的な `--pix` は読み込みを必須にする指定で、失敗時は終了コード1を返します。
 - アプリ自身で1フレームを保存する場合は `--pix-capture <file.wpix>` を使います。これは `--pix` の読み込みも行います。
+- キャプチャ層を自動読み込みしない通常描画は `--no-pix` を指定します。性能の基準値を計測する際に使ってください。`--pix` / `--pix-capture` との併用はエラーです。PIXから起動してすでに注入されているキャプチャ層は取り除きません。
+
+更新前の実行中プロセスに対しては、後からGPUキャプチャ層を読み込んでも接続できません。アプリを再起動して、ImGui上部の `PIX GPU capture` に `Capture layer: loaded / ready to attach` が表示されることを確認してください。
+
+## ImGuiから保存する
+
+`PIX GPU capture` の `Capture next frame (.wpix)` で、ボタンを押した後に描画する1フレームを保存します。保存先は実行ファイル隣の `captures/`、ファイル名は日時・ミリ秒・プロセスIDを含む `.wpix` です。保存後もアプリは動作を続け、再度撮影できます。
+
+`Open in PIX after saving` は既定でオンです。保存に成功すると、Windowsの `.wpix` 関連付けを使ってPIXで開きます。PIXを入れ直すなどして関連付けがない場合は、保存済みファイルを残してUIへ起動エラーを表示します。`Open PIX capture folder` で保存先を開けます。キャプチャ層が未ロードの場合、撮影ボタンを無効にして再起動の案内を表示します。キャプチャに失敗しても描画を継続し、HRESULTを含む理由をUIに表示します。
+
+UIとCLIは共通の要求・開始・終了処理を使用します。CLIは指定先に保存して終了し、PIX GUIは開きません。
 
 ```powershell
 .\build\x64\Release\DxrCube\DxrCube.exe --pix-capture build/checks/cube.wpix
@@ -52,4 +63,6 @@ PIXが入っているPCで、両構成をビルドしてから実行します。
 
 スクリプトはPIXの `pixtool.exe` を探します。必要なら `-PixTool <フルパス>` で指定できます。Clear、Cube、UsdKitchenのNEE、ReSTIR＋RR、Normalの5ケースをキャプチャし、CSVのイベント一覧に必要なマーカーがあることと、デバッグレイヤー付き再生を検証します。NormalではRR評価のマーカーが存在しないことも確認します。`.wpix`、PNG、CSV、解析ログを `build/checks/pix-<構成>/` に保存します。
 
-PNGを開いて表示も確認してください。PIX 2610.28／RTX 3060 TiでDebug／Releaseの計10キャプチャの保存・イベント解析・再生と表示を確認しました。Timing Capture、PIX GUIでの接続操作、他のGPU／PIXバージョンでの動作は未確認です。
+PNGを開いて表示も確認してください。PIX 2610.28／RTX 3060 TiでDebug／Releaseの計10キャプチャの保存・イベント解析・再生と表示を確認しました。通常起動したアプリのImGuiでの撮影・保存先を開く操作、Kitchen Setの保存後にPIXが自動で開くことも確認しました。Timing Capture、PIX GUIでのプロセス接続操作、他のGPU／PIXバージョンでの動作は未確認です。
+
+この環境ではPIX GUIのStart Analysisで、NVIDIAのハードウェア性能カウンターへの権限不足の警告が出ました。OS／ドライバの設定は変更していません。`.wpix` の保存・イベント一覧・デバッグレイヤー再生の検証と、ハードウェアカウンターの取得は区別してください。GUIで開いているキャプチャの同時CLI解析が失敗したため、UIで保存したKitchen Setは別名コピーを使ってイベント解析・再生を確認しました。

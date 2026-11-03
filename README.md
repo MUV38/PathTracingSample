@@ -178,14 +178,16 @@ $app.ExitCode
 
 NuGet復元でWinPixEventRuntimeを取得し、ビルド時にDLLとライセンスを実行ファイル隣へコピーします。PIX本体は別途必要で、自動インストールしません。
 
-PIXから実行ファイルを起動してGPU Captureを取れます。通常起動したアプリにPIXから接続したい場合は `--pix` を付けて起動します。キャプチャ層をDirectX／Streamlineの初期化前に読み込みます。
+PIXがインストールされていれば、通常起動でもキャプチャ層をDirectX／Streamlineの初期化前に読み込みます。更新前から実行中のアプリは一度終了して起動し直してください。ImGui上部の `PIX GPU capture` で状態を確認し、`Capture next frame (.wpix)` から保存できます。既定で保存後にPIXを開きます。`Open in PIX after saving` で切り替えられます。
 
 ```powershell
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --pix
 .\build\x64\Release\UsdKitchen\UsdKitchen.exe --rr --restir spatial --samples 128 --pix-capture build/checks/frame.wpix --screenshot build/checks/frame.png
 ```
 
-`--pix-capture` は撮影準備ができた1フレームを `.wpix` に保存して終了します。`--samples` の待機条件にも従い、単写PNGと同時保存できます。連射撮影との併用はできません。通常の起動ではPIXのキャプチャ層を読み込みませんが、マーカーは有効です。
+UIからの保存先は実行ファイル隣の `captures/` です。`Open PIX capture folder` で開けます。PIXが見つからない場合でも描画は継続し、UIに理由を表示します。`--pix` は読み込みを必須にする指定で、`--no-pix` はアプリ側の自動読み込みを無効にします。キャプチャ層の負荷を含めない性能計測には `--no-pix` を使用してください。
+
+`--pix-capture` は撮影準備ができた1フレームを `.wpix` に保存して終了します。`--samples` の待機条件にも従い、単写PNGと同時保存できます。連射撮影との併用はできません。自動テスト用のCLIキャプチャではPIXのGUIを開きません。
 
 フレーム、ReSTIR、パストレーシング、RR、トーンマッピング、画面コピー、ImGui、Present／VSync、GPU待機にマーカーを付けています。詳細と自動検証は [PIXの確認手順](tests/PixCapture.md) を参照してください。
 

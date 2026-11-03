@@ -28,6 +28,10 @@ public:
 	void requestScreenshot(const std::filesystem::path& path = {});
 	bool screenshotSucceeded() const { return mScreenshotSucceeded; }
 	const std::string& screenshotStatus() const { return mScreenshotStatus; }
+	void requestPixCapture(const std::filesystem::path& path = {}, bool openInPix = false);
+	bool pixCaptureSucceeded() const { return mPixCaptureSucceeded; }
+	const std::string& pixCaptureStatus() const { return mPixCaptureStatus; }
+	void setPixStartupStatus(const std::string& status) { mPixCaptureStatus = status; }
 	const std::wstring& adapterName() const { return mAdapterName; }
 	bool supportsRaytracing() const { return mRaytracingSupported; }
 	ID3D12Device* device() const { return mDevice.Get(); }
@@ -47,6 +51,7 @@ private:
 	void initializeGui(HWND window);
 	void drawGui();
 	void openScreenshotDirectory();
+	void openDirectory(const std::filesystem::path& directory, std::string& status);
 	void allocateGuiDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle);
 	void freeGuiDescriptor(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle);
 
@@ -77,6 +82,11 @@ private:
 	std::filesystem::path mScreenshotPath;
 	std::string mScreenshotStatus;
 	bool mScreenshotSucceeded = false;
+	std::filesystem::path mPixCapturePath;
+	std::string mPixCaptureStatus;
+	bool mPixCaptureSucceeded = false;
+	bool mPixOpenAfterSave = true;
+	bool mPixOpenRequested = false;
 	const Sample* mSample = nullptr;
 	MouseMotion mMouseMotion;
 	HWND mWindow = nullptr;
