@@ -2,6 +2,7 @@
 
 Visual Studio 2026で開く、Win32 / DirectX 12 / DXRのサンプル集です。
 Agility SDK **1.722.0-preview** と Dear ImGui **v1.93.0** を使用します。
+PIX用のCPU／GPUマーカーには、公式NuGetの **WinPixEventRuntime 1.0.240308001** を使用します。Debug／Releaseの両方で有効です。
 UsdKitchenのビルド前に `.\tools\RestoreStreamline.ps1` でStreamline **2.14.16** を復元してください。対応RTX GPUではDLSS Ray Reconstructionを利用できます。DLLのライセンス確認と配置、`--rr` による実行は [RRの導入手順](tests/RayReconstruction.md) を参照してください。
 
 ## サンプル
@@ -65,7 +66,7 @@ Cube.hlslはWindows SDKのDXCでlib_6_3としてビルドし、実行ファイ�
 実行時のカレントディレクトリに依存せず、実行ファイルの位置からシェーダーを読み込みます。
 配布時はCube.dxilと下記のD3D12フォルダも含めてください。
 
-packages.configの公式Agility SDKをルートのpackagesフォルダに復元します。
+packages.configの公式Agility SDKとWinPixEventRuntimeをルートのpackagesフォルダに復元します。
 共通MSBuild props / targetsがインクルードパスを設定し、各実行ファイル隣のD3D12フォルダにランタイムDLLとPDBを配置します。
 各実行ファイルはD3D12SDKVersion = 722と、相対パスD3D12を示すD3D12SDKPathをエクスポートします。
 Agility SDKは将来のCLAS利用を見据えた指定版を維持しています。DXR対応の表示はCLAS対応を意味しません。
@@ -172,6 +173,23 @@ $app.ExitCode
 
 成功時は終了コード0、失敗時は1です。エラー内容は標準エラーとデバッガ出力にも書き込みます。
 自動確認時はエラーダイアログを表示しません。保存したPNGも開いて、描画内容を確認してください。
+
+## PIXキャプチャ
+
+NuGet復元でWinPixEventRuntimeを取得し、ビルド時にDLLとライセンスを実行ファイル隣へコピーします。PIX本体は別途必要で、自動インストールしません。
+
+PIXがインストールされていれば、通常起動でもキャプチャ層をDirectX／Streamlineの初期化前に読み込みます。更新前から実行中のアプリは一度終了して起動し直してください。ImGui上部の `PIX GPU capture` で状態を確認し、`Capture next frame (.wpix)` から保存できます。既定で保存後にPIXを開きます。`Open in PIX after saving` で切り替えられます。
+
+```powershell
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --pix
+.\build\x64\Release\UsdKitchen\UsdKitchen.exe --rr --restir spatial --samples 128 --pix-capture build/checks/frame.wpix --screenshot build/checks/frame.png
+```
+
+UIからの保存先は実行ファイル隣の `captures/` です。`Open PIX capture folder` で開けます。PIXが見つからない場合でも描画は継続し、UIに理由を表示します。`--pix` は読み込みを必須にする指定で、`--no-pix` はアプリ側の自動読み込みを無効にします。キャプチャ層の負荷を含めない性能計測には `--no-pix` を使用してください。
+
+`--pix-capture` は撮影準備ができた1フレームを `.wpix` に保存して終了します。`--samples` の待機条件にも従い、単写PNGと同時保存できます。連射撮影との併用はできません。自動テスト用のCLIキャプチャではPIXのGUIを開きません。
+
+フレーム、ReSTIR、パストレーシング、RR、トーンマッピング、画面コピー、ImGui、Present／VSync、GPU待機にマーカーを付けています。詳細と自動検証は [PIXの確認手順](tests/PixCapture.md) を参照してください。
 
 ## 参考
 

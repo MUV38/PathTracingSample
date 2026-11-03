@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "Sample.h"
+#include <pix3.h>
 
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
@@ -152,11 +153,40 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		}
 		commandLineMode = argumentCount > 1;
 		std::filesystem::path screenshotPath;
+		std::filesystem::path pixCapturePath;
+		bool enablePix = false;
+		bool disablePix = false;
+		std::string pixStartupStatus;
 		uint32_t screenshotCount = 1;
 		uint32_t capturedFrames = 0;
 		std::vector<std::wstring> sampleArguments;
 		for (int index = 1; index < argumentCount; ++index)
 		{
+			if (std::wstring_view(arguments.get()[index]) == L"--no-pix")
+			{
+				disablePix = true;
+				continue;
+			}
+			if (std::wstring_view(arguments.get()[index]) == L"--pix")
+			{
+				enablePix = true;
+				continue;
+			}
+			if (std::wstring_view(arguments.get()[index]) == L"--pix-capture")
+			{
+				if (!pixCapturePath.empty() || ++index >= argumentCount || arguments.get()[index][0] == L'\0')
+				{
+					throw std::runtime_error("--pix-capture requires one output.wpix path.");
+				}
+				pixCapturePath = std::filesystem::absolute(arguments.get()[index]);
+				if (pixCapturePath.extension() != L".wpix")
+				{
+					throw std::runtime_error("--pix-capture requires a .wpix file.");
+				}
+				std::filesystem::create_directories(pixCapturePath.parent_path());
+				enablePix = true;
+				continue;
+			}
 			if (std::wstring_view(arguments.get()[index]) == L"--screenshot-count")
 			{
 				if (++index >= argumentCount)
@@ -190,6 +220,36 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 		if (screenshotCount > 1 && !screenshotMode)
 		{
 			throw std::runtime_error("--screenshot-count requires --screenshot <output.png>.");
+		}
+		if (!pixCapturePath.empty() && screenshotCount > 1)
+		{
+			throw std::runtime_error("--pix-capture supports a single screenshot, not a screenshot burst.");
+		}
+		if (enablePix && disablePix)
+		{
+			throw std::runtime_error("--no-pix cannot be combined with --pix or --pix-capture.");
+		}
+		if (!disablePix && !GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+		{
+			// Load before sample configuration: Streamline may invoke graphics APIs there.
+			// Keep the capture layer loaded for the process lifetime; sample graphics
+			// objects can outlive runSample().
+			if (!PIXLoadLatestWinPixGpuCapturerLibrary())
+			{
+				pixStartupStatus = "PIX capture layer could not load (Windows error " + std::to_string(GetLastError()) + "). Install PIX and restart, or launch through PIX.";
+				if (enablePix)
+				{
+					throw std::runtime_error(pixStartupStatus);
+				}
+			}
+		}
+		if (GetModuleHandleW(L"WinPixGpuCapturer.dll"))
+		{
+			pixStartupStatus = "Ready. Save a frame here or attach PIX to this process.";
+		}
+		else if (disablePix)
+		{
+			pixStartupStatus = "PIX auto-loading disabled by --no-pix. Restart without that option to enable capture.";
 		}
 		if (sample.mConfigure)
 		{
@@ -231,6 +291,7 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 
 		Renderer renderer;
 		renderer.initialize(window, state.mWidth, state.mHeight, sample);
+		renderer.setPixStartupStatus(pixStartupStatus);
 		const std::wstring title = std::wstring(sample.mName) + L" | DirectX 12 | " + renderer.adapterName() +
 			(renderer.supportsRaytracing() ? L" | DXR supported" : L" | DXR unavailable");
 		SetWindowTextW(window, title.c_str());
@@ -256,6 +317,12 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 				renderer.setMouseMotion(std::exchange(state.mMouseMotion, MouseMotion{0.0f, 0.0f, state.mRawMouseRegistered}));
 				const bool captureFrame = screenshotMode && renderedFrames >= 2
 					&& (capturedFrames > 0 || !sample.mReadyForScreenshot || sample.mReadyForScreenshot());
+				const bool capturePixFrame = !pixCapturePath.empty() && renderedFrames >= 2
+					&& (!sample.mReadyForScreenshot || sample.mReadyForScreenshot());
+				if (capturePixFrame)
+				{
+					renderer.requestPixCapture(pixCapturePath);
+				}
 				if (captureFrame || state.mScreenshotRequested)
 				{
 					auto path = captureFrame ? screenshotPath : std::filesystem::path{};
@@ -270,6 +337,18 @@ int runSample(HINSTANCE instance, int showCommand, const Sample& sample)
 				}
 				renderer.render();
 				++renderedFrames;
+				if (capturePixFrame)
+				{
+					if (!renderer.pixCaptureSucceeded())
+					{
+						throw std::runtime_error(renderer.pixCaptureStatus());
+					}
+					if (!captureFrame)
+					{
+						DestroyWindow(window);
+						return 0;
+					}
+				}
 				if (captureFrame)
 				{
 					const int result = renderer.screenshotSucceeded() ? 0 : 1;

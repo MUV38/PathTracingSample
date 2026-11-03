@@ -1,4 +1,5 @@
 #include "MeshRaytracer.h"
+#include <pix3.h>
 #include "GgxEnergyLut.h"
 #include "Renderer.h"
 #include "Sample.h"
@@ -160,6 +161,7 @@ void MeshRaytracer::initialize(Renderer& renderer)
 
 void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 {
+	PIXScopedEvent(PIX_COLOR(160, 110, 220), "Load scene / build acceleration structures");
 	validateSceneMaterials(scene.mMaterials);
 	// Keep the old scene alive until the replacement has finished building.
 	const UINT64 byteSize = scene.mVertices.size() * sizeof(SceneVertex);
@@ -270,13 +272,19 @@ void MeshRaytracer::load(Renderer& renderer, const SceneData& scene)
 	build.Inputs = blasInputs;
 	build.DestAccelerationStructureData = blas->GetGPUVirtualAddress();
 	build.ScratchAccelerationStructureData = scratch->GetGPUVirtualAddress();
-	commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(160, 110, 220), "Build scene BLAS");
+		commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	}
 	barrier = {};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	commands->ResourceBarrier(1, &barrier);
 	build.Inputs = tlasInputs;
 	build.DestAccelerationStructureData = tlas->GetGPUVirtualAddress();
-	commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(160, 110, 220), "Build scene TLAS");
+		commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	}
 	barrier.UAV.pResource = tlas.Get();
 	commands->ResourceBarrier(1, &barrier);
 	check(commands->Close(), "Close scene command list");
@@ -362,6 +370,7 @@ void MeshRaytracer::updateMaterials(Renderer& renderer, const std::vector<SceneM
 
 void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& environment)
 {
+	PIXScopedEvent(PIX_COLOR(100, 170, 200), "Upload IBL / sampling distribution");
 	const auto distribution = createEnvironmentDistribution(environment);
 	const size_t distributionBytes = distribution.size() * sizeof(distribution[0]);
 	auto distributionUpload = uploadBuffer(mDevice.Get(), distribution.data(), distributionBytes);
@@ -401,8 +410,11 @@ void MeshRaytracer::loadEnvironment(Renderer& renderer, const EnvironmentMap& en
 	source.PlacedFootprint = footprint;
 	destination.pResource = texture.Get();
 	destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-	commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-	commands->CopyBufferRegion(distributionBuffer.Get(), 0, distributionUpload.Get(), 0, distributionBytes);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(100, 170, 200), "Upload IBL / sampling distribution");
+		commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+		commands->CopyBufferRegion(distributionBuffer.Get(), 0, distributionUpload.Get(), 0, distributionBytes);
+	}
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition = {texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
@@ -608,6 +620,10 @@ void MeshRaytracer::resizeRestir(size_t pixels)
 void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewportLeft, const Lighting& lighting, const PathTracing& tracing, float exposure, bool meshletColors,
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
+	PIXScopedEvent(commandList, PIX_COLOR(80, 160, 220), "UsdKitchen");
+	PIXSetMarker(commandList, PIX_COLOR(80, 160, 220), "%ux%u / spp=%u / bounces=%u / ReSTIR=%u / RR=%u / view=%u",
+		renderer.width(), renderer.height(), tracing.mSamplesPerFrame, tracing.mMaxBounces, tracing.mRestirMode,
+		mUseRayReconstruction ? 1u : 0u, mRRView);
 	// SampleFramework has completed the previous frame before this readback.
 	if (mHasTimestamp)
 	{
@@ -844,6 +860,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		restirBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 		for (UINT pass = 0; pass < 2; ++pass)
 		{
+			PIXScopedEvent(commands.Get(), PIX_COLOR(220, 150, 60), pass == 0 ? "ReSTIR DI / candidates + temporal" : "ReSTIR DI / spatial reuse");
 			commands->ResourceBarrier(1, &restirBarrier);
 			commands->SetComputeRoot32BitConstant(12, pass, 0);
 			commands->DispatchRays(&dispatch);
@@ -851,7 +868,10 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		commands->ResourceBarrier(1, &restirBarrier);
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
-	commands->DispatchRays(&dispatch);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), useRR && mRRView >= 2 ? "RR diagnostic guides" : "Path tracing");
+		commands->DispatchRays(&dispatch);
+	}
 	if (useRR)
 	{
 		if (reconstructRR)
@@ -864,7 +884,10 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		guideBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 		commands->ResourceBarrier(1, &guideBarrier);
 		commands->SetComputeRoot32BitConstant(12, 3, 0);
-		commands->DispatchRays(&dispatch);
+		{
+			PIXScopedEvent(commands.Get(), PIX_COLOR(150, 200, 100), "Tone mapping / RR view");
+			commands->DispatchRays(&dispatch);
+		}
 	}
 	// Guide motion still needs the previous camera. Changing RR view is part
 	// of settingsChanged, so returning to Output resets reconstruction history.
@@ -899,7 +922,10 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	barriers[1].Transition = {backBuffer, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST};
 	commands->ResourceBarrier(2, barriers);
-	commands->CopyResource(backBuffer, mOutput.Get());
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(100, 180, 180), "Copy to back buffer");
+		commands->CopyResource(backBuffer, mOutput.Get());
+	}
 	for (auto& barrier : barriers)
 	{
 		std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);

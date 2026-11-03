@@ -6,6 +6,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <RepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</RepositoryRoot>
+    <WinPixRoot>$(RepositoryRoot)packages\WinPixEventRuntime.1.0.240308001\</WinPixRoot>
     <VCProjectVersion>18.0</VCProjectVersion>
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -42,14 +43,15 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;USE_PIX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(RepositoryRoot)common;$(RepositoryRoot)third_party\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WinPixRoot)Include\WinPixEventRuntime;$(RepositoryRoot)common;$(RepositoryRoot)third_party\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;user32.lib;d3dcompiler.lib;dwmapi.lib;windowscodecs.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(WinPixRoot)bin\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>WinPixEventRuntime.lib;d3d12.lib;dxgi.lib;dxguid.lib;user32.lib;d3dcompiler.lib;dwmapi.lib;windowscodecs.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>

@@ -1,4 +1,5 @@
 #include "DxrCube.h"
+#include <pix3.h>
 #include "Renderer.h"
 #include "Sample.h"
 
@@ -92,6 +93,7 @@ void DxrCube::initialize(Renderer& renderer)
 
 void DxrCube::buildAccelerationStructures(Renderer& renderer)
 {
+	PIXScopedEvent(PIX_COLOR(160, 110, 220), "DXR cube / build acceleration structures");
 	constexpr float vertices[][3] = {
 		{-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}, {1, -1, -1},
 		{-1, -1, 1}, {-1, 1, 1}, {1, 1, 1}, {1, -1, 1}
@@ -160,14 +162,20 @@ void DxrCube::buildAccelerationStructures(Renderer& renderer)
 	build.Inputs = blasInputs;
 	build.DestAccelerationStructureData = mBlas->GetGPUVirtualAddress();
 	build.ScratchAccelerationStructureData = scratch->GetGPUVirtualAddress();
-	commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(160, 110, 220), "Build cube BLAS");
+		commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	}
 	D3D12_RESOURCE_BARRIER barrier{};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	barrier.UAV.pResource = nullptr; // Order BLAS writes and reuse of the scratch buffer before the TLAS build.
 	commands->ResourceBarrier(1, &barrier);
 	build.Inputs = tlasInputs;
 	build.DestAccelerationStructureData = mTlas->GetGPUVirtualAddress();
-	commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(160, 110, 220), "Build cube TLAS");
+		commands->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+	}
 	barrier.UAV.pResource = mTlas.Get();
 	commands->ResourceBarrier(1, &barrier);
 	check(commands->Close(), "Close AS command list");
@@ -334,6 +342,7 @@ void DxrCube::drawGui()
 
 void DxrCube::render(Renderer& renderer, ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
+	PIXScopedEvent(commandList, PIX_COLOR(80, 160, 220), "DXR Cube");
 	if (mWidth != renderer.width() || mHeight != renderer.height())
 	{
 		// The framework waits for the previous frame before resizing or reusing resources.
@@ -367,7 +376,10 @@ void DxrCube::render(Renderer& renderer, ID3D12GraphicsCommandList* commandList,
 	dispatch.Width = mWidth;
 	dispatch.Height = mHeight;
 	dispatch.Depth = 1;
-	commands->DispatchRays(&dispatch);
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), "Trace cube");
+		commands->DispatchRays(&dispatch);
+	}
 
 	D3D12_RESOURCE_BARRIER barriers[2]{};
 	for (auto& barrier : barriers)
@@ -380,7 +392,10 @@ void DxrCube::render(Renderer& renderer, ID3D12GraphicsCommandList* commandList,
 	barriers[1].Transition = {backBuffer, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST};
 	commands->ResourceBarrier(2, barriers);
-	commands->CopyResource(backBuffer, mOutput.Get());
+	{
+		PIXScopedEvent(commands.Get(), PIX_COLOR(100, 180, 180), "Copy to back buffer");
+		commands->CopyResource(backBuffer, mOutput.Get());
+	}
 	for (auto& barrier : barriers)
 	{
 		std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);

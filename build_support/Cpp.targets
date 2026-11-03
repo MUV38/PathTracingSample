@@ -6,7 +6,14 @@
             Condition="Exists('$(RepositoryRoot)packages\Microsoft.Direct3D.D3D12.1.722.0-preview\build\native\Microsoft.Direct3D.D3D12.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(WinPixRoot)Include\WinPixEventRuntime\pix3.h') Or !Exists('$(WinPixRoot)bin\x64\WinPixEventRuntime.lib')"
+           Text="WinPixEventRuntime 1.0.240308001 is missing. Restore the root packages.config before building." />
     <Error Condition="!Exists('$(RepositoryRoot)packages\Microsoft.Direct3D.D3D12.1.722.0-preview\build\native\Microsoft.Direct3D.D3D12.targets')"
            Text="Agility SDK is missing. Restore NuGet packages for PathTracingSample.slnx before building." />
+  </Target>
+  <Target Name="CopyWinPixRuntime" AfterTargets="Build" Condition="'$(ConfigurationType)'=='Application'">
+    <Copy SourceFiles="$(WinPixRoot)bin\x64\WinPixEventRuntime.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(WinPixRoot)license.txt" DestinationFiles="$(OutDir)WinPixEventRuntime.LICENSE.txt" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(WinPixRoot)ThirdPartyNotices.txt" DestinationFiles="$(OutDir)WinPixEventRuntime.NOTICES.txt" SkipUnchangedFiles="true" />
   </Target>
 </Project>
