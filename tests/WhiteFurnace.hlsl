@@ -73,7 +73,7 @@ float3 testFiniteReservoirValue(Surface surface, float3 view, LightReservoir res
 	return evaluateReservoirSample(surface, view, meshLights[reservoir.lightIndex], reservoir.uv);
 }
 [numthreads(64, 1, 1)]
-void CSMain(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+void CS_Main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
 	TestCase input = cases[group.x];
 	Surface surface = (Surface)0;
