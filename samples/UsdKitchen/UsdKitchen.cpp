@@ -873,6 +873,11 @@ void UsdKitchen::drawGui()
 		ImGui::TextWrapped("%s", mRaytracer.rayReconstruction().status().c_str());
 		ImGui::TextWrapped("RR receives the current noisy HDR frame. Long-term accumulation is used only with RR off.");
 		ImGui::TextWrapped("G-buffer and meshlet views bypass RR.");
+		ImGui::TextWrapped("Normal and other guides use pixel centers. Noisy HDR shows the jittered input.");
+		if (mRaytracer.gpuMilliseconds() >= 0)
+		{
+			ImGui::Text("Scene GPU: %.2f ms", mRaytracer.gpuMilliseconds());
+		}
 	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{

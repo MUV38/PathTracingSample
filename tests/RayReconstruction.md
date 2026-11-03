@@ -38,6 +38,10 @@ ImGuiを除いた表示領域専用のテクスチャを使い、RR後にトー�
 
 `RR view` または `--rr-view output|noisy|normal|roughness|diffuse|specular|motion|depth|hit-distance` で入力を可視化できます。このCLI指定はRRも有効にします。Motionは0を中間灰色、10 pixelを半レンジで表示し、深度／距離は `d / (1 + d)`、アルベドはsRGB変換して表示します。
 
+NormalからSpecular hit distanceまでの診断表示は、揺れを避けるためピクセル中心のレイで生成します。反射距離用レイの乱数もフレーム間で固定し、RRの評価と不要な多重バウンスは実行しません。通常のOutputとNoisy HDRは従来どおりジッターを使います。Noisy HDRは未蓄積の入力であり、サンプリングのノイズや輪郭のジッターが見えます。表示をOutputへ戻すとRR履歴をリセットします。Motion用の前フレームのカメラ情報は診断表示でも更新します。
+
+`Scene GPU` はシーン描画・ガイド生成・OutputでのRR評価のGPU時間です。VSync待機、ImGui描画、CPU側処理やPNG保存の時間を含まないため、画面のFPSとは区別してください。PresentはVSync有効で、RRによる負荷増加でリフレッシュ周期を超えるとFPSが下がる場合があります。RRを30 FPSへ固定する処理はありません。
+
 ## 確認
 
 Debug / Releaseをビルド後、それぞれ実行します。
@@ -52,6 +56,8 @@ Debug / Releaseをビルド後、それぞれ実行します。
 PNGは必ず開いて表示も確認してください。この自動撮影だけではカメラ移動中の残像や、手動リサイズ・切り替えの応答は検証できません。これらは別に確認し、未実施なら報告に明記します。SDKの評価APIが成功を返しても内部エラーを記録する場合があるため、評価中のエラーログもアプリ側で検出して終了します。
 
 静止時の揺れは、同スクリプトから呼ぶ `RunRayReconstructionStability.ps1` で検証します。128フレーム待った後に16フレーム連射し、白色環境内の黒い平面の輝度で重み付けした重心を測ります。縦横それぞれの最大値－最小値が0.15 pixel以下であることを確認し、`build/checks/rr-stability-<構成>/` にPNGとstability.jsonを保存します。カメラ移動中の品質を保証するテストではありません。
+
+同じスクリプトから呼ぶ `RunRayReconstructionGuideStability.ps1` は、Normal・Roughness・拡散／鏡面アルベド・Motion・Depth・反射距離それぞれを16フレーム連射し、ImGuiを除く領域のRGBが完全一致することを検証します。ローカルKitchen SetがあればそのNormalも確認し、SDKログで診断表示中にRRを評価していないことを検査します。結果は `build/checks/rr-guides-<構成>/` に保存します。
 
 レイが `pixelCenter + sampleJitter` をサンプルする場合、入力画像上の形状は `-sampleJitter` 移動するため、Streamlineへ渡す `jitterOffset` はサンプルオフセットの逆符号です。投影関連の行列はジッターを含めず、モーションもジッターを除いた値を維持します。ジッター自体を無効にして揺れを隠す処理は行いません。
 

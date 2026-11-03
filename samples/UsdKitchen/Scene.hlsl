@@ -338,8 +338,12 @@ void RGSMain()
 		else
 		{
 			uint2 guidePixel = uint2(pixel.x - uint(viewportLeft), pixel.y);
-			float3 color = displayColor(rrOutput[guidePixel].rgb);
-			if (rrDebug == 1)
+			float3 color = 0;
+			if (rrDebug == 0)
+			{
+				color = displayColor(rrOutput[guidePixel].rgb);
+			}
+			else if (rrDebug == 1)
 			{
 				color = displayColor(rrColor[guidePixel].rgb);
 			}
@@ -410,6 +414,10 @@ void RGSMain()
 			if (rrEnabled != 0 && sampleIndex == 0 && depth == 0)
 			{
 				writeRRGuides(pixel, ray, payload, rectangleIndex, rectangleDistance);
+				if (rrDebug >= 2)
+				{
+					return;
+				}
 			}
 			if (rectangleIndex < rectangleCount
 				&& (payload.hit == 0 || rectangleDistance < dot(payload.position - ray.Origin, ray.Direction)))

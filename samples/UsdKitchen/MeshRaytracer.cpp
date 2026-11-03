@@ -667,6 +667,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
 	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && !meshletColors;
+	const bool reconstructRR = useRR && mRRView == 0;
 	if (useRR)
 	{
 		viewportLeft = std::ceil(viewportLeft);
@@ -761,7 +762,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const bool resetRR = !mRRHistoryValid || mResetAccumulation || settingsChanged || viewportLeft != mPreviousViewportLeft;
 	constants.mRRReset = resetRR ? 1u : 0u;
 	constants.mRRFrame = constants.mRestirFrame;
-	if (useRR)
+	if (useRR && mRRView <= 1)
 	{
 		auto halton = [](uint32_t index, uint32_t base)
 		{
@@ -853,12 +854,20 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	commands->DispatchRays(&dispatch);
 	if (useRR)
 	{
-		mRayReconstruction.evaluate(commands.Get(), camera, static_cast<UINT>(viewportLeft), constants.mRRJitter,
-			mPreviousViewProjection, resetRR, constants.mRRFrame);
-		bindScene();
+		if (reconstructRR)
+		{
+			mRayReconstruction.evaluate(commands.Get(), camera, static_cast<UINT>(viewportLeft), constants.mRRJitter,
+				mPreviousViewProjection, resetRR, constants.mRRFrame);
+			bindScene();
+		}
+		D3D12_RESOURCE_BARRIER guideBarrier{};
+		guideBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+		commands->ResourceBarrier(1, &guideBarrier);
 		commands->SetComputeRoot32BitConstant(12, 3, 0);
 		commands->DispatchRays(&dispatch);
 	}
+	// Guide motion still needs the previous camera. Changing RR view is part
+	// of settingsChanged, so returning to Output resets reconstruction history.
 	mRRHistoryValid = useRR;
 	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
 	commands->ResolveQueryData(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, mTimestampReadback.Get(), 0);

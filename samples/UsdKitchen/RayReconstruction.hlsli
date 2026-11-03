@@ -29,7 +29,8 @@ float rrReflectionDistance(Surface surface, float3 view, uint2 pixel)
 	{
 		return 0;
 	}
-	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x + (rrFrame + 1u) * 0x9e3779b9u;
+	uint guideFrame = rrDebug >= 2 ? 0u : rrFrame;
+	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x + (guideFrame + 1u) * 0x9e3779b9u;
 	float3 direction, unusedWeight;
 	// Select the finite GGX lobe explicitly; this guide uses its own RNG.
 	if (!sampleBsdf(surface, view, float3(random(state), random(state), 0), direction, unusedWeight))
