@@ -18,6 +18,11 @@ if ($LASTEXITCODE -ne 0)
 {
 	throw "Rectangle integration failed. See furnace.csv."
 }
+& (Join-Path $repository ("build/x64/" + $Configuration + "/MeshLightTests/MeshLightTests.exe")) (Join-Path $outputPath "mesh")
+if ($LASTEXITCODE -ne 0)
+{
+	throw "Mesh light fixtures failed."
+}
 $cases = @(
 	@{ Name="small"; Model="rectangle-shadow"; Options="--rect-size 0.2 0.2 --rect-radiance 400 --samples 256" },
 	@{ Name="large"; Model="rectangle-shadow"; Options="--rect-size 2 2 --rect-radiance 4 --samples 256" },
@@ -29,6 +34,21 @@ $cases = @(
 	@{ Name="back"; Model="rectangle-floor"; Options="--rect-size 1 1 --rect-radiance 4 --samples 128" },
 	@{ Name="back-ibl"; Model="rectangle-floor"; Options="--rect-size 1 1 --rect-radiance 0 --ibl-intensity 1 --bounces 0 --samples 128" }
 )
+foreach ($mode in @("ris", "temporal", "spatial"))
+{
+	$cases += @{ Name="mis-" + $mode; Model="rectangle-floor"; Options="--restir $mode --rect-size 2 2 --rect-radiance 4 --samples 1024" }
+}
+foreach ($name in @("small", "large", "mirror", "mirror-bsdf", "front", "back", "back-ibl"))
+{
+	$source = $cases | Where-Object Name -eq $name
+	$cases += @{ Name=$name + "-spatial"; Model=$source.Model; Options=$source.Options + " --restir spatial" }
+}
+foreach ($mode in @("off", "spatial"))
+{
+	$cases += @{ Name="ibl-" + $mode; Model="rectangle-floor"; Options="--restir $mode --rect-size 2 2 --rect-radiance 4 --ibl-intensity 1 --samples 1024" }
+	$cases += @{ Name="mesh-" + $mode; Model="mesh/multiple"; Options="--restir $mode --rect-position 0 2.8 0 --rect-size 1 1 --rect-radiance 4 --samples 1024" }
+	$cases += @{ Name="all-" + $mode; Model="mesh/multiple"; Options="--restir $mode --rect-position 0 2.8 0 --rect-size 1 1 --rect-radiance 4 --ibl-intensity 1 --samples 1024" }
+}
 Add-Type -AssemblyName System.Drawing
 $summary = @()
 foreach ($case in $cases)
@@ -100,3 +120,30 @@ if ([Math]::Abs($mis - $bsdf) -gt 1.0)
 	throw "MIS and BSDF-only images disagree in mean brightness."
 }
 Write-Output "Rectangle light checks passed. Open the PNGs to inspect soft shadows and occlusion."
+foreach ($name in @("small", "large", "mirror", "mirror-bsdf", "front", "back", "back-ibl"))
+{
+	$baseline = ($summary | Where-Object Name -eq $name).Mean
+	$result = ($summary | Where-Object Name -eq ($name + "-spatial")).Mean
+	if ([Math]::Abs($baseline - $result) -gt 1.0)
+	{
+		throw ("ReSTIR rectangle mean differs: " + $name)
+	}
+}
+foreach ($mode in @("ris", "temporal", "spatial"))
+{
+	$result = ($summary | Where-Object Name -eq ("mis-" + $mode)).Mean
+	if ([Math]::Abs($mis - $result) -gt 1.0)
+	{
+		throw ("ReSTIR rectangle mean differs: " + $mode)
+	}
+}
+foreach ($name in @("ibl", "mesh", "all"))
+{
+	$baseline = ($summary | Where-Object Name -eq ($name + "-off")).Mean
+	$result = ($summary | Where-Object Name -eq ($name + "-spatial")).Mean
+	if ([Math]::Abs($baseline - $result) -gt 1.0)
+	{
+		throw ("Mixed light mean differs: " + $name)
+	}
+}
+Write-Output "ReSTIR rectangle and mixed light checks passed."

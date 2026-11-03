@@ -765,7 +765,7 @@ void UsdKitchen::drawGui()
 		ImGui::Combo("G-buffer view", &debug, "Lighting\0Normal\0Depth\0Motion\0Reservoir / history\0");
 		mTracing.mRestirMode = static_cast<uint32_t>(mode);
 		mTracing.mRestirDebug = static_cast<uint32_t>(debug);
-		ImGui::TextWrapped("Primary IBL and emissive mesh lighting. Rectangle lights and secondary bounces use existing NEE / MIS.");
+		ImGui::TextWrapped("Primary IBL, emissive mesh and rectangle lighting. Secondary bounces use existing NEE / MIS.");
 	}
 	if (ImGui::CollapsingHeader("Indirect lighting / IBL", ImGuiTreeNodeFlags_DefaultOpen))
 	{
