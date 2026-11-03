@@ -1,4 +1,4 @@
-// Initial diffuse GI candidates only. No temporal/spatial resampling yet.
+// Raw diffuse GI path candidates. Temporal mode reuses one previous raw draw.
 // This stage preserves the original BRDF-mixture proposal and its full PDF.
 struct GiCandidate
 {
@@ -14,7 +14,15 @@ struct GiCandidate
 	float inversePdf;
 	float3 direction;
 	float targetDensity;
-}; // 96 bytes; renderer allocation must match.
+	float3 sourceNormal;
+	uint sourceMaterial;
+	float3 sourceGeometricNormal;
+	uint sourceValid;
+	float3 sourceBaseColor;
+	uint reusable;
+	float3 sourceView;
+	uint padding;
+}; // 160 bytes; renderer allocation must match.
 
 float3 giDiffuseBrdfCosine(Surface surface, float3 view, float3 direction)
 {
@@ -62,4 +70,23 @@ void addGiPathRadiance(float3 value, float3 throughput, bool capture, float3 suf
 		suffixRadiance += suffixThroughput * value;
 		referenceDiffuse += diffuseRatio * contribution;
 	}
+}
+
+float3 giBalanceEstimate(float3 integrand, float currentPdf, float previousPdf)
+{
+	float pdf = currentPdf + previousPdf;
+	return pdf > 0 && isfinite(pdf) ? integrand / pdf : 0;
+}
+
+float3 resampleGiPair(float3 currentEstimate, float3 previousEstimate, float u, out bool selectedPrevious)
+{
+	float currentWeight = dot(max(currentEstimate, 0), float3(0.2126f, 0.7152f, 0.0722f));
+	float previousWeight = dot(max(previousEstimate, 0), float3(0.2126f, 0.7152f, 0.0722f));
+	float total = currentWeight + previousWeight;
+	selectedPrevious = previousWeight > 0 && (currentWeight == 0 || u * total < previousWeight);
+	if (total <= 0 || !isfinite(total))
+	{
+		return 0;
+	}
+	return selectedPrevious ? previousEstimate * (total / previousWeight) : currentEstimate * (total / currentWeight);
 }

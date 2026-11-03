@@ -62,8 +62,8 @@ PIXが入っているPCで、両構成をビルドしてから実行します。
 .\tests\RunPixCapture.ps1 -Configuration Release
 ```
 
-スクリプトはPIXの `pixtool.exe` を探します。必要なら `-PixTool <フルパス>` で指定できます。Clear、Cube、ClasSandboxの通常DXR、UsdKitchenのNEE、ReSTIR＋RR、Normalの6ケースをキャプチャし、CSVのイベント一覧に必要なマーカーがあることと、デバッグレイヤー付き再生を検証します。ClasSandboxは `--no-preview` でCLAS未対応環境でも検証できる経路を使用します。NormalではRR評価のマーカーが存在しないことも確認します。`.wpix`、PNG、CSV、解析ログを `build/checks/pix-<構成>/` に保存します。
+スクリプトはPIXの `pixtool.exe` を探します。必要なら `-PixTool <フルパス>` で指定できます。Clear、Cube、ClasSandboxの通常DXR、UsdKitchenのNEE、ReSTIR＋RR、NormalとGI時間再利用の7ケースをキャプチャし、CSVのイベント一覧に必要なマーカーがあることと、デバッグレイヤー付き再生を検証します。ClasSandboxは `--no-preview` でCLAS未対応環境でも検証できる経路を使用します。NormalではRR評価のマーカーが存在しないことも確認します。`.wpix`、PNG、CSV、解析ログを `build/checks/pix-<構成>/` に保存します。
 
-PNGを開いて表示も確認してください。PIX 2610.28／RTX 3060 TiでDebug／Releaseの計12キャプチャの保存・イベント解析・再生と表示を確認しました。通常起動したアプリのImGuiでの撮影・保存先を開く操作、Kitchen Setの保存後にPIXが自動で開くことも確認しました。Timing Capture、PIX GUIでのプロセス接続操作、他のGPU／PIXバージョンでの動作は未確認です。
+PNGを開いて表示も確認してください。PIX 2610.28／RTX 3060 TiでDebug／Releaseの計14キャプチャの保存・イベント解析・再生と表示を確認しました。通常起動したアプリのImGuiでの撮影・保存先を開く操作、Kitchen Setの保存後にPIXが自動で開くことも確認しました。Timing Capture、PIX GUIでのプロセス接続操作、他のGPU／PIXバージョンでの動作は未確認です。
 
 この環境ではPIX GUIのStart Analysisで、NVIDIAのハードウェア性能カウンターへの権限不足の警告が出ました。OS／ドライバの設定は変更していません。`.wpix` の保存・イベント一覧・デバッグレイヤー再生の検証と、ハードウェアカウンターの取得は区別してください。GUIで開いているキャプチャの同時CLI解析が失敗したため、UIで保存したKitchen Setは別名コピーを使ってイベント解析・再生を確認しました。

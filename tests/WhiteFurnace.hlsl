@@ -126,6 +126,27 @@ void CS_Main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	{
 		++invalid;
 	}
+	// Balance MIS must keep the second proposal even when its sampled value is zero.
+	// Partial support plus a null outcome: q0=(.7,.2,.1), q1=(0,.6,.4).
+	float3 balanceMean = 0;
+	float3 weightedBalanceMean = 0;
+	const float q0[3] = {0.7f, 0.2f, 0.1f};
+	const float q1[3] = {0.0f, 0.6f, 0.4f};
+	const float3 values[3] = {float3(1,0,0), float3(0,0,2), float3(0,0,0)};
+	for (uint outcome = 0; outcome < 3; ++outcome)
+	{
+		balanceMean += (q0[outcome] + q1[outcome]) * giBalanceEstimate(values[outcome], q0[outcome], q1[outcome]);
+		weightedBalanceMean += (q0[outcome] + 0.25f * q1[outcome]) * giBalanceEstimate(values[outcome], q0[outcome], 0.25f * q1[outcome]);
+	}
+	bool selectedPrevious;
+	float3 pair = resampleGiPair(float3(1,2,3), float3(3,6,9), float(thread) / 64, selectedPrevious);
+	float3 nullPair = resampleGiPair(0, float3(1,2,3), 0.9f, selectedPrevious);
+	if (any(abs(balanceMean - float3(1,0,2)) > 1e-6f) || any(abs(weightedBalanceMean - float3(1,0,2)) > 1e-6f)
+		|| any(abs(pair - float3(4,8,12)) > 1e-5f)
+		|| any(abs(nullPair - float3(1,2,3)) > 1e-6f) || any(giBalanceEstimate(1, 0, 0) != 0))
+	{
+		++invalid;
+	}
 	uint rejected = 0;
 	bool multipleRectangles = (input.flags & 32768u) != 0;
 	uint rectangleCount = (input.flags & 65536u) != 0 ? 32u : 2u;

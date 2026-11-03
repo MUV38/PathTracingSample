@@ -118,10 +118,12 @@ struct SceneConstants
 	uint32_t mRRDebug = 0;
 	uint32_t mGiEnabled = 0;
 	uint32_t mGiView = 0;
-	std::array<uint32_t,2> mGiPadding{};
+	uint32_t mGiUseHistory = 1;
+	uint32_t mGiPadding = 0;
 	uint32_t mHistoryValid = 0;
 	uint32_t mRestirFrame = 0;
-	std::array<float,2> mHistoryPadding{};
+	uint32_t mGiHistoryValid = 0;
+	float mHistoryPadding = 0;
 	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
 	float mPreviousViewportLeft = 0;
 	std::array<float,3> mPreviousCameraPadding{};
@@ -454,7 +456,9 @@ void MeshRaytracer::createPipeline()
 	rrRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	rrRange.BaseShaderRegister = 7;
 	rrRange.NumDescriptors = 8;
-	D3D12_ROOT_PARAMETER parameters[20]{};
+	D3D12_ROOT_PARAMETER parameters[21]{};
+	parameters[20].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+	parameters[20].Descriptor.ShaderRegister = 16;
 	parameters[19].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
 	parameters[19].Descriptor.ShaderRegister = 15;
 	parameters[18].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -536,7 +540,7 @@ void MeshRaytracer::createPipeline()
 	hitGroup.HitGroupExport = L"CubeHitGroup";
 	hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
 	hitGroup.ClosestHitShaderImport = L"CHS_Main";
-	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{15 * sizeof(float), 2 * sizeof(float)};
+	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig{16 * sizeof(float), 2 * sizeof(float)};
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig{1};
 	ID3D12RootSignature* globalRoot = mRootSignature.Get();
 	const D3D12_STATE_SUBOBJECT subobjects[] = {
@@ -626,9 +630,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
 	PIXScopedEvent(commandList, PIX_COLOR(80, 160, 220), "UsdKitchen");
-	PIXSetMarker(commandList, PIX_COLOR(80, 160, 220), "%ux%u / spp=%u / bounces=%u / ReSTIR=%u / RR=%u / view=%u",
+	PIXSetMarker(commandList, PIX_COLOR(80, 160, 220), "%ux%u / spp=%u / bounces=%u / ReSTIR=%u / RR=%u / view=%u / GI=%u",
 		renderer.width(), renderer.height(), tracing.mSamplesPerFrame, tracing.mMaxBounces, tracing.mRestirMode,
-		mUseRayReconstruction ? 1u : 0u, mRRView);
+		mUseRayReconstruction ? 1u : 0u, mRRView, tracing.mGiMode);
 	// SampleFramework has completed the previous frame before this readback.
 	if (mHasTimestamp)
 	{
@@ -643,7 +647,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 7)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 9 || tracing.mGiMode > 2)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -687,8 +691,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
-	constants.mGiEnabled = !meshletColors && (tracing.mGiCandidates || tracing.mGiView > 0) ? 1u : 0u;
+	constants.mGiEnabled = meshletColors ? 0u : (tracing.mGiView == 8 ? 2u : (std::max)(tracing.mGiMode, tracing.mGiView > 0 ? 1u : 0u));
 	constants.mGiView = meshletColors ? 0u : tracing.mGiView;
+	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
 	const bool reconstructRR = useRR && mRRView == 0;
 	if (useRR)
@@ -715,11 +720,24 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const size_t giPixels = constants.mGiEnabled != 0 ? static_cast<size_t>(mWidth) * mHeight : 1;
 	if (mGiPixels != giPixels)
 	{
-		auto candidates = createBuffer(mDevice.Get(), giPixels * 96, D3D12_HEAP_TYPE_DEFAULT,
+		auto candidates = createBuffer(mDevice.Get(), giPixels * 160, D3D12_HEAP_TYPE_DEFAULT,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		check(candidates->SetName(L"Diffuse GI / initial candidates (96 bytes per pixel)"), "Name GI candidates");
+		check(candidates->SetName(L"Diffuse GI / current raw candidates (160 bytes per pixel)"), "Name GI candidates");
 		mGiCandidates = std::move(candidates);
 		mGiPixels = giPixels;
+		mGiHistoryValid = false;
+	}
+	const bool temporalGi = constants.mGiEnabled == 2 && tracing.mMaxBounces > 0 && constants.mRestirDebug == 0
+		&& !(constants.mGiView >= 4 && constants.mGiView <= 7) && (!useRR || mRRView <= 1);
+	const size_t previousGiPixels = temporalGi ? giPixels : 1;
+	if (mPreviousGiPixels != previousGiPixels)
+	{
+		auto previous = createBuffer(mDevice.Get(), previousGiPixels * 160, D3D12_HEAP_TYPE_DEFAULT,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		check(previous->SetName(L"Diffuse GI / previous raw candidates (not resampled)"), "Name previous GI candidates");
+		mPreviousGiCandidates = std::move(previous);
+		mPreviousGiPixels = previousGiPixels;
+		mGiHistoryValid = false;
 	}
 	if (lighting.mRectangleCount > Lighting::maximumRectangles)
 	{
@@ -787,6 +805,24 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const bool hadPrevious = mPreviousConstants.size() == integratorSize;
 	const bool settingsChanged = !hadPrevious
 		|| std::memcmp(mPreviousConstants.data() + cameraSize, reinterpret_cast<const uint8_t*>(&constants) + cameraSize, integratorSize - cameraSize) != 0;
+	bool cameraCut = !hadPrevious;
+	if (hadPrevious)
+	{
+		SceneConstants previous{};
+		std::memcpy(&previous, mPreviousConstants.data(), integratorSize);
+		const auto delta = DirectX::XMVectorSubtract(DirectX::XMLoadFloat3(&constants.mPosition), DirectX::XMLoadFloat3(&previous.mPosition));
+		const float translation = DirectX::XMVectorGetX(DirectX::XMVector3Length(delta));
+		const float rotation = DirectX::XMVectorGetX(DirectX::XMVector3Dot(DirectX::XMLoadFloat3(&constants.mForward), DirectX::XMLoadFloat3(&previous.mForward)));
+		cameraCut = translation > (std::max)(0.001f, camera.distance() * 0.5f) || rotation < 0.7071f;
+	}
+	constants.mGiHistoryValid = temporalGi && tracing.mGiHistory && mGiHistoryValid && !mResetAccumulation
+		&& !settingsChanged && !cameraCut && viewportLeft == mPreviousViewportLeft ? 1u : 0u;
+	mLastGiHistoryValid = constants.mGiHistoryValid != 0;
+	if (constants.mGiEnabled != 0)
+	{
+		PIXSetMarker(commandList, PIX_COLOR(100, 190, 150), "Diffuse GI mode=%u / history=%u / view=%u",
+			constants.mGiEnabled, constants.mGiHistoryValid, constants.mGiView);
+	}
 	constants.mHistoryValid = mRestirHistoryValid && !mResetAccumulation && !settingsChanged ? 1u : 0u;
 	constants.mRestirFrame = mRestirFrame++;
 	constants.mPreviousViewProjection = mPreviousViewProjection;
@@ -847,6 +883,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		rrGpuHandle.ptr += 3 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		commands->SetComputeRootDescriptorTable(18, rrGpuHandle);
 		commands->SetComputeRootUnorderedAccessView(19, mGiCandidates->GetGPUVirtualAddress());
+		commands->SetComputeRootUnorderedAccessView(20, mPreviousGiCandidates->GetGPUVirtualAddress());
 		commands->SetComputeRootConstantBufferView(3, mConstants->GetGPUVirtualAddress());
 		commands->SetPipelineState1(mPipeline.Get());
 	};
@@ -874,7 +911,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	{
 		D3D12_RESOURCE_BARRIER giBarrier{};
 		giBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-		giBarrier.UAV.pResource = mGiCandidates.Get();
+		giBarrier.UAV.pResource = nullptr; // Order current writes and the previous frame's raw candidates.
 		commands->ResourceBarrier(1, &giBarrier);
 	}
 	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
@@ -925,6 +962,11 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		std::swap(mRestirBuffers[3], mRestirBuffers[4]);
 	}
 	mRestirHistoryValid = needsPrimaryData;
+	if (temporalGi)
+	{
+		std::swap(mGiCandidates, mPreviousGiCandidates);
+	}
+	mGiHistoryValid = temporalGi;
 	const auto position = camera.position();
 	const auto cameraForward = camera.forward();
 	const auto up = camera.up();

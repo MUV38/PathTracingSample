@@ -23,6 +23,7 @@ $cases = @(
 	@{Name="clear"; Project="PathTracingSample"; Options=""; Markers=@()},
 	@{Name="cube"; Project="DxrCube"; Options=""; Markers=@("DXR Cube", "Trace cube", "Copy to back buffer")},
 	@{Name="clas-reference"; Project="ClasSandbox"; Options="--model assets/PreviewRoom.ptscene --no-preview"; Markers=@("CLAS Sandbox", "Trace reference meshlets", "Copy to back buffer")},
+	@{Name="gi-temporal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --specular 0 --restir-gi temporal --samples 128"; Markers=@("Path tracing", "GI=2", "Copy to back buffer")},
 	@{Name="nee"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --no-rr --samples 128"; Markers=@("UsdKitchen", "Path tracing", "Copy to back buffer")},
 	@{Name="restir-rr"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr --restir spatial --samples 128"; Markers=@("ReSTIR DI / candidates + temporal", "ReSTIR DI / spatial reuse", "Path tracing", "DLSS Ray Reconstruction", "Tone mapping / RR view")},
 	@{Name="normal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr-view normal --samples 128"; Markers=@("RR diagnostic guides", "Tone mapping / RR view")}
