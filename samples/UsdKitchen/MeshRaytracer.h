@@ -72,6 +72,8 @@ private:
 	bool mResetAccumulation = true;
 	std::vector<uint8_t> mPreviousConstants;
 	std::array<ComPtr<ID3D12Resource>,5> mRestirBuffers;
+	ComPtr<ID3D12Resource> mGiCandidates;
+	size_t mGiPixels = 0;
 	size_t mRestirPixels = 0;
 	bool mRestirHistoryValid = false;
 	uint32_t mRestirFrame = 0;

@@ -5,6 +5,7 @@
 #include "../samples/UsdKitchen/MeshLight.hlsli"
 #include "../samples/UsdKitchen/RussianRoulette.hlsli"
 #include "../samples/UsdKitchen/RestirDI.hlsli"
+#include "../samples/UsdKitchen/RestirGI.hlsli"
 
 struct TestCase
 {
@@ -98,6 +99,33 @@ void CS_Main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 	uint state = (group.x + 1u) * 277803737u + (thread + 1u) * 747796405u;
 	float3 sum = 0, sumSquared = 0, reference = 0, referenceSquared = 0;
 	uint invalid = 0, referenceInvalid = 0;
+	// Analytic GI checks: solid-angle -> area measure, the M=1 estimator,
+	// and exclusion of pure-metal / low-roughness primary surfaces.
+	GiCandidate gi = (GiCandidate)0;
+	gi.valid = 1;
+	gi.diffuseBrdfCosine = float3(0.25f, 0.5f, 0.75f);
+	gi.radiance = float3(4, 2, 1);
+	gi.inversePdf = 4;
+	Surface giSurface = surface;
+	giSurface.metallic = 1;
+	float3 metalGi = giDiffuseBrdfCosine(giSurface, view, float3(0,0,1));
+	giSurface.metallic = 0;
+	giSurface.roughness = 0.1f;
+	float3 sharpGi = giDiffuseBrdfCosine(giSurface, view, float3(0,0,1));
+	if (any(abs(shadeGiCandidate(gi) - float3(4,4,3)) > 1e-6f)
+		|| abs(giAreaPdf(0.25f, 0, float3(0,0,2), float3(0,0,-1)) - 0.0625f) > 1e-6f
+		|| abs(giAreaPdf(0.25f, 0, float3(0,0,2), float3(0.6f,0,-0.8f)) - 0.05f) > 1e-6f
+		|| giAreaPdf(0, 0, float3(0,0,2), float3(0,0,-1)) != 0
+		|| giAreaPdf(1, 0, 0, float3(0,0,1)) != 0
+		|| any(metalGi != 0) || any(sharpGi != 0))
+	{
+		++invalid;
+	}
+	gi.valid = 0;
+	if (any(shadeGiCandidate(gi) != 0))
+	{
+		++invalid;
+	}
 	uint rejected = 0;
 	bool multipleRectangles = (input.flags & 32768u) != 0;
 	uint rectangleCount = (input.flags & 65536u) != 0 ? 32u : 2u;

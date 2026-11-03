@@ -116,6 +116,9 @@ struct SceneConstants
 	uint32_t mRestirDebug = 0;
 	uint32_t mRREnabled = 0;
 	uint32_t mRRDebug = 0;
+	uint32_t mGiEnabled = 0;
+	uint32_t mGiView = 0;
+	std::array<uint32_t,2> mGiPadding{};
 	uint32_t mHistoryValid = 0;
 	uint32_t mRestirFrame = 0;
 	std::array<float,2> mHistoryPadding{};
@@ -126,7 +129,7 @@ struct SceneConstants
 	uint32_t mRRReset = 0;
 	uint32_t mRRFrame = 0;
 };
-static_assert(sizeof(SceneConstants) == 2896);
+static_assert(sizeof(SceneConstants) == 2912);
 }
 
 void MeshRaytracer::initialize(Renderer& renderer)
@@ -451,7 +454,9 @@ void MeshRaytracer::createPipeline()
 	rrRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	rrRange.BaseShaderRegister = 7;
 	rrRange.NumDescriptors = 8;
-	D3D12_ROOT_PARAMETER parameters[19]{};
+	D3D12_ROOT_PARAMETER parameters[20]{};
+	parameters[19].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+	parameters[19].Descriptor.ShaderRegister = 15;
 	parameters[18].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	parameters[18].DescriptorTable.NumDescriptorRanges = 1;
 	parameters[18].DescriptorTable.pDescriptorRanges = &rrRange;
@@ -638,7 +643,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 7)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -682,7 +687,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
 	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
 	constants.mRestirDebug = tracing.mRestirDebug;
-	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && !meshletColors;
+	constants.mGiEnabled = !meshletColors && (tracing.mGiCandidates || tracing.mGiView > 0) ? 1u : 0u;
+	constants.mGiView = meshletColors ? 0u : tracing.mGiView;
+	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
 	const bool reconstructRR = useRR && mRRView == 0;
 	if (useRR)
 	{
@@ -705,6 +712,15 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	const bool needsPrimaryData = constants.mRestirMode > 0 || constants.mRestirDebug > 0;
 	resizeRestir(needsPrimaryData ? static_cast<size_t>(mWidth) * mHeight : 1);
+	const size_t giPixels = constants.mGiEnabled != 0 ? static_cast<size_t>(mWidth) * mHeight : 1;
+	if (mGiPixels != giPixels)
+	{
+		auto candidates = createBuffer(mDevice.Get(), giPixels * 96, D3D12_HEAP_TYPE_DEFAULT,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		check(candidates->SetName(L"Diffuse GI / initial candidates (96 bytes per pixel)"), "Name GI candidates");
+		mGiCandidates = std::move(candidates);
+		mGiPixels = giPixels;
+	}
 	if (lighting.mRectangleCount > Lighting::maximumRectangles)
 	{
 		throw std::runtime_error("At most 32 rectangle lights are supported.");
@@ -830,6 +846,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		auto rrGpuHandle = mSrvUavHeap->GetGPUDescriptorHandleForHeapStart();
 		rrGpuHandle.ptr += 3 * mDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 		commands->SetComputeRootDescriptorTable(18, rrGpuHandle);
+		commands->SetComputeRootUnorderedAccessView(19, mGiCandidates->GetGPUVirtualAddress());
 		commands->SetComputeRootConstantBufferView(3, mConstants->GetGPUVirtualAddress());
 		commands->SetPipelineState1(mPipeline.Get());
 	};
@@ -853,6 +870,13 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	accumulationBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
 	accumulationBarrier.UAV.pResource = mAccumulation.Get();
 	commands->ResourceBarrier(1, &accumulationBarrier);
+	if (constants.mGiEnabled != 0)
+	{
+		D3D12_RESOURCE_BARRIER giBarrier{};
+		giBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+		giBarrier.UAV.pResource = mGiCandidates.Get();
+		commands->ResourceBarrier(1, &giBarrier);
+	}
 	commands->EndQuery(mTimestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0);
 	if (needsPrimaryData)
 	{
