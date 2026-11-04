@@ -100,8 +100,14 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 		{
 			Surface surface = giSourceSurface(current);
 			float3 direction = normalize(history.position - surface.position);
-			float3 integrand = giDiffuseBrdfCosine(surface, current.sourceView, direction) * history.radiance
-				* giConnectionJacobian(history, surface.position);
+			float3 factor = giDiffuseBrdfCosine(surface, current.sourceView, direction);
+			if (giEnabled == 4)
+			{
+				float pdf;
+				factor = evaluateBsdf(surface, current.sourceView, direction, pdf)
+					* saturate(dot(surface.normal, direction)) * surface.occlusion;
+			}
+			float3 integrand = factor * history.radiance * giConnectionJacobian(history, surface.position);
 			historyEstimate = giBalanceEstimate(integrand, currentPdf, history.areaPdf * historyRatio) * historyRatio;
 		}
 	}

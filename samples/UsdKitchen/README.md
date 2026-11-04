@@ -223,6 +223,8 @@ NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBL
 `--no-gi-spatial` と `--no-gi-history` で各再利用を個別に無効化でき、`--gi-view history|spatial|diffuse-noisy` で候補の受理・選択や非蓄積GIを確認できます。
 
 ReSTIR PTの準備として、`--path-replay` は通常PTの各サンプルを開始時の乱数シードから再現し、照合に失敗した画素をマゼンタで表示します。`--path-replay-check` では、一致を緑、2本以上のレイを追跡した一致をシアンで表示します。両モードではReSTIR DI/GIとRay Reconstructionを無効にします。検証手順は [PathReplay.md](../../tests/PathReplay.md) を参照してください。
+
+`--restir-pt temporal` または `PT temporal (full primary BSDF)` で、前フレームの生候補1本への時間再接続を試せます。粗さ0.2以上の一次面ではGGXを含むBSDF全体を評価し、平坦なLambert二次面からの反射放射輝度を再利用します。`--gi-view history` で履歴を表示し、`--no-gi-history` で現在の候補だけと比較できます。対象経路と検証手順は [RestirGI.md](../../tests/RestirGI.md) を参照してください。
 再帰的な履歴蓄積と空間再利用は未実装です。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 

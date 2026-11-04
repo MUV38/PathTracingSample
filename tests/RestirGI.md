@@ -142,4 +142,21 @@ RTX 3060 Ti、1280×720、1sppの測定例です。MSEは拡散GIの非蓄積16�
 
 空間再利用の導入時は、Debug / Releaseで空間・初期候補・時間・PIXのテストと保存画像を確認しました。Kitchen Setも元のPBR設定とspecular=0の両方で描画しました。手動のUI・キー／マウス操作は未確認です。
 
+## ReSTIR PTの時間再接続
+
+`--restir-pt temporal` は、粗さ0.2以上の一次面から平坦なLambert二次面へ到達する経路に対して、一次面のBSDF全体を再評価します。拡散・GGX・多重散乱補償を含み、粗い金属も対象です。二次面自体の発光は直接光のMIS側に残します。デルタ経路と方向依存の二次面は通常PTで評価します。
+
+前フレームの生候補1本と現在の候補を、面積PDF・可視性を含む既存のbalance MISで統合します。一次面では再接続先の方向に対してBSDF、余弦、遮蔽係数を掛け、立体角から面積へのヤコビアンを適用します。このモードの `--gi-view diffuse` と `diffuse-noisy` は、鏡面成分も含めた再接続対象の間接光を表示します。履歴の無効化とガイドは既存の時間モードと共通です。
+
+この段階は一次面からの直接再接続です。保存した放射輝度をそのまま使える二次面に絞っています。乱数再生と組み合わせたhybrid shift、空間再利用、再帰的なreservoirは後続段階です。
+
+```powershell
+.\tests\RunGiTemporal.ps1 -Configuration Debug -FullBsdf
+.\tests\RunGiTemporal.ps1 -Configuration Release -FullBsdf
+```
+
+既存のRGB平均・履歴切り替え・DI／RR併用テストに加え、拡散成分がない粗い金属の一次面でも間接光が再接続されることを確認します。同じシーンの通常PT、現在候補のみ、履歴ありを比較し、履歴選択の青も検査します。画像とCSVは `build/checks/pt-temporal-<構成>/` に保存します。
+
+RTX 3060 TiのReleaseでは、粗い金属シーンの総照明の平均輝度が、通常PTで0.221563、現在候補のみで0.221560、履歴ありで0.221555でした。
+
 設計の背景は [NVIDIA RTXDIの説明](https://github.com/NVIDIA-RTX/RTXDI/blob/main/Doc/RestirGI.md) も参照しています。SDK自体は組み込んでいません。

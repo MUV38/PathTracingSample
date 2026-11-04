@@ -140,16 +140,22 @@ int wmain(int count, wchar_t** arguments)
 		testDistribution();
 		const std::filesystem::path directory = arguments[1];
 		std::filesystem::create_directories(directory);
-		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored"})
+		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored", L"gi-rough-metal"})
 		{
 			const std::wstring mode = name;
-			const bool gi = mode == L"gi-colored";
+			const bool roughMetal = mode == L"gi-rough-metal";
+			const bool gi = mode == L"gi-colored" || roughMetal;
 			auto scene = fixture(mode == L"shadow" || gi, mode == L"mirror", mode == L"multiple" || gi, mode == L"dark");
 			if (gi)
 			{
 				// A GGX+diffuse primary floor, Lambertian secondary blocker, two colored emitters.
 				scene.mMaterials.push_back(scene.mMaterials[0]);
 				scene.mMaterials[0].mSpecular = 0.5f;
+				if (roughMetal)
+				{
+					scene.mMaterials[0].mMetallic = 1;
+					scene.mMaterials[0].mRoughness = 0.6f;
+				}
 				for (size_t meshletIndex = 1; meshletIndex <= 5; ++meshletIndex)
 				{
 					const auto& meshlet = scene.mMeshlets[meshletIndex];

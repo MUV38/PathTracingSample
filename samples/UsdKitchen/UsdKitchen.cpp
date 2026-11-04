@@ -344,6 +344,16 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mGiMode = value == L"spatial" ? 3u : value == L"temporal" ? 2u : (value == L"candidates" ? 1u : 0u);
 			continue;
 		}
+		if (flag == L"--restir-pt" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			if (value != L"temporal" && value != L"off")
+			{
+				throw std::runtime_error("--restir-pt expects off or temporal.");
+			}
+			mTracing.mGiMode = value == L"temporal" ? 4u : 0u;
+			continue;
+		}
 		if (flag == L"--path-replay" || flag == L"--path-replay-check")
 		{
 			mTracing.mPathReplay = flag == L"--path-replay-check" ? 2u : 1u;
@@ -960,15 +970,15 @@ void UsdKitchen::drawGui()
 	if (ImGui::CollapsingHeader("ReSTIR GI"))
 	{
 		int mode = static_cast<int>(mTracing.mGiMode);
-		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0");
+		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0PT temporal (full primary BSDF)\0");
 		mTracing.mGiMode = static_cast<uint32_t>(mode);
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
 		int view = static_cast<int>(mTracing.mGiView);
 		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
-		ImGui::TextWrapped("Temporal mode reuses one previous raw candidate with balance MIS. Only flat Lambertian secondary surfaces are reused; glossy transport stays in ordinary PT. Spatial mode also reuses four current raw neighbors. No recursive reuse.");
-		ImGui::TextWrapped("Primary roughness below 0.2 and pure metals use ordinary PT. Diagnostic views enable candidate generation and bypass RR. Normal/PDF/valid use fixed samples.");
+		ImGui::TextWrapped("Temporal modes reuse one previous raw candidate with balance MIS on flat Lambertian secondary surfaces. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
+		ImGui::TextWrapped("Primary roughness below 0.2 uses ordinary PT. In PT temporal, the Diffuse indirect views include glossy primary transport. Diagnostic views bypass RR. Normal/PDF/valid use fixed samples.");
 		ImGui::TextWrapped("160 bytes/pixel per raw buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))

@@ -560,8 +560,9 @@ void RGS_Main()
 				candidate.sourceMaterial = payload.materialIndex;
 				candidate.sourceBaseColor = surface.baseColor;
 				candidate.sourceView = view;
-				candidate.sourceValid = surface.roughness >= 0.2f && surface.metallic < 1 && surface.occlusion > 0
-					&& maxComponent(surface.baseColor * (1 - fresnelSchlick(materialF0(surface), dot(surface.normal, view)))) > 0 ? 1u : 0u;
+				bool diffuseSource = surface.metallic < 1
+					&& maxComponent(surface.baseColor * (1 - fresnelSchlick(materialF0(surface), dot(surface.normal, view)))) > 0;
+				candidate.sourceValid = surface.roughness >= 0.2f && surface.occlusion > 0 && (giEnabled == 4 || diffuseSource) ? 1u : 0u;
 			}
 			if (giEnabled != 0 && depth == 1 && candidate.solidAnglePdf > 0)
 			{
@@ -696,6 +697,11 @@ void RGS_Main()
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
 				float3 factor = giDiffuseBrdfCosine(surface, view, nextDirection);
+				if (giEnabled == 4)
+				{
+					// The full-lobe mode reconnects finite primary BSDFs, including rough metals.
+					factor = candidate.sourceValid != 0 ? weight * pdf : 0;
+				}
 				if (pdf > 1e-10f && (maxComponent(factor) > 0 || (giEnabled >= 2 && candidate.sourceValid != 0)))
 				{
 					candidate.sourcePosition = surface.position;
@@ -704,7 +710,7 @@ void RGS_Main()
 					candidate.inversePdf = rcp(pdf);
 					candidate.diffuseBrdfCosine = factor;
 					candidate.direction = nextDirection;
-					diffuseRatio = select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
+					diffuseRatio = giEnabled == 4 ? 1 : select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
 				}
 			}
 			if (environmentMis != 0 && environmentIntensity > 0.0f && !delta)

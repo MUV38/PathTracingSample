@@ -1,10 +1,13 @@
 param(
 	[ValidateSet("Debug", "Release")]
-	[string]$Configuration = "Debug"
+	[string]$Configuration = "Debug",
+	[switch]$FullBsdf
 )
 $ErrorActionPreference = "Stop"
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$output = Join-Path $repository "build/checks/gi-temporal-$Configuration"
+$namePrefix = if ($FullBsdf) { 'pt-temporal' } else { 'gi-temporal' }
+$modeOptions = if ($FullBsdf) { '--restir-pt temporal' } else { '--restir-gi temporal' }
+$output = Join-Path $repository "build/checks/$namePrefix-$Configuration"
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $binary = Join-Path $repository "build/x64/$Configuration"
 $viewer = Join-Path $binary "UsdKitchen/UsdKitchen.exe"
@@ -23,7 +26,7 @@ function Capture([string]$name, [string]$options, [string]$model = "")
 	{
 		$model = Join-Path $output "MeshLightTests/shadow.ptscene"
 	}
-	$arguments = '--no-pix --restir-gi temporal --samples 512 --spp 4 --light-strength 0 --ambient 0 --ibl-intensity 0 --model "{0}" {1} --screenshot "{2}/{3}.png"' -f $model, $options, $output, $name
+	$arguments = '--no-pix {0} --samples 512 --spp 4 --light-strength 0 --ambient 0 --ibl-intensity 0 --model "{1}" {2} --screenshot "{3}/{4}.png"' -f $modeOptions, $model, $options, $output, $name
 	$process = Start-Process -FilePath $viewer -ArgumentList $arguments -WorkingDirectory $repository -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $output "$name.stderr.txt")
 	if (!$process.WaitForExit(90000))
 	{
@@ -54,7 +57,30 @@ Capture 'glossy-diffuse' '--gi-view diffuse --specular 0.5'
 Capture 'black' '' (Join-Path $output 'MeshLightTests/dark.ptscene')
 Capture 'mirror-diffuse' '--gi-view diffuse' (Join-Path $output 'WhiteFurnaceTests/mirror.ptscene')
 $summary = @()
-foreach ($pair in @(@('baseline','temporal'), @('di-baseline','di-temporal'), @('rr-baseline','rr-temporal'), @('diffuse-reference','diffuse-temporal'), @('colored-baseline','colored-temporal'), @('glossy-baseline','glossy-temporal')))
+$pairs = @(@('baseline','temporal'), @('di-baseline','di-temporal'), @('rr-baseline','rr-temporal'), @('diffuse-reference','diffuse-temporal'), @('colored-baseline','colored-temporal'), @('glossy-baseline','glossy-temporal'))
+if ($FullBsdf)
+{
+	$metal = Join-Path $output 'MeshLightTests/gi-rough-metal.ptscene'
+	Capture 'metal-ordinary' '--restir-pt off --samples 2048 --spp 16' $metal
+	Capture 'metal-fresh' '--no-gi-history --samples 2048 --spp 16' $metal
+	Capture 'metal-temporal' '--samples 2048 --spp 16' $metal
+	Capture 'metal-component' '--gi-view diffuse --samples 512 --spp 8' $metal
+	Capture 'metal-diffuse-only' '--restir-gi temporal --gi-view diffuse --samples 512 --spp 8' $metal
+	Capture 'metal-history' '--gi-view history --samples 16 --spp 1' $metal
+	$component = [GiImageMetrics]::Read((Join-Path $output 'metal-component.png'))
+	$diffuseOnly = [GiImageMetrics]::Read((Join-Path $output 'metal-diffuse-only.png'))
+	if ($component[7] -lt 100 -or $diffuseOnly[7] -ne 0)
+	{
+		throw 'Expected the rough-metal fixture to isolate the primary specular contribution.'
+	}
+	if (([GiImageMetrics]::Read((Join-Path $output 'metal-history.png')))[5] -lt 20)
+	{
+		throw 'Expected previous paths to be selected in the rough-metal fixture.'
+	}
+	$pairs += ,@('metal-ordinary','metal-fresh')
+	$pairs += ,@('metal-ordinary','metal-temporal')
+}
+foreach ($pair in $pairs)
 {
 	$a = [GiImageMetrics]::Read((Join-Path $output ($pair[0]+'.png')))
 	$b = [GiImageMetrics]::Read((Join-Path $output ($pair[1]+'.png')))
