@@ -1,7 +1,8 @@
 param(
 	[ValidateSet("Debug", "Release")]
 	[string]$Configuration = "Debug",
-	[string]$PixTool = ""
+	[string]$PixTool = "",
+	[switch]$HybridCost
 )
 $ErrorActionPreference = "Stop"
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
@@ -30,6 +31,21 @@ $cases = @(
 	@{Name="restir-rr"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr --restir spatial --samples 128"; Markers=@("ReSTIR DI / candidates + temporal", "ReSTIR DI / spatial reuse", "Path tracing", "DLSS Ray Reconstruction", "Tone mapping / RR view")},
 	@{Name="normal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr-view normal --samples 128"; Markers=@("RR diagnostic guides", "Tone mapping / RR view")}
 )
+if ($HybridCost)
+{
+	$cases = foreach ($fixture in @('mirror','glossy'))
+	{
+		foreach ($mode in @('unoptimized','optimized'))
+		{
+			$options = '--model "build/checks/pt-hybrid-cost-{0}/fixtures/pt-hybrid-{1}.ptscene" --no-rr --restir-pt hybrid --light-strength 0 --ambient 0 --ibl-intensity 0 --samples 128' -f $Configuration,$fixture
+			if ($mode -eq 'unoptimized')
+			{
+				$options += ' --hybrid-unoptimized'
+			}
+			@{Name="hybrid-$fixture-$mode"; Project='UsdKitchen'; Options=$options; Markers=@('Path tracing', 'GI=5', 'history=1', 'DispatchRays', 'Copy to back buffer')}
+		}
+	}
+}
 foreach ($case in $cases)
 {
 	$exe = Join-Path $repository "build/x64/$Configuration/$($case.Project)/$($case.Project).exe"

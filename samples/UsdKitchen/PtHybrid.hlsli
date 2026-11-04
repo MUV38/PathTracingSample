@@ -1,6 +1,6 @@
 // The sample domain is (primary BSDF random triplet, reconnect vertex area).
 // Replay preserves the triplet, so only the connection changes measure.
-float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 factor)
+float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 factor, inout uint3 work)
 {
 	factor = 0;
 	Surface primary = giSourceSurface(source);
@@ -20,6 +20,10 @@ float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 facto
 	ray.TMax = 100000;
 	Payload payload;
 	payload.hit = 0;
+	if (giView == 11)
+	{
+		++work.x;
+	}
 	TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
 	if (payload.hit == 0 || payload.triangleIndex != path.prefixTriangle)
 	{
@@ -43,7 +47,15 @@ float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 facto
 	}
 	float pdf;
 	float3 bsdf = evaluateBsdf(middle, -direction, connection, pdf);
-	if (pdf <= 1e-10f || maxComponent(bsdf) <= 0 || !visibleToPoint(middle, path.position))
+	if (pdf <= 1e-10f || maxComponent(bsdf) <= 0)
+	{
+		return 0;
+	}
+	if (giView == 11)
+	{
+		++work.y;
+	}
+	if (!visibleToPoint(middle, path.position))
 	{
 		return 0;
 	}

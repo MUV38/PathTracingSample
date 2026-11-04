@@ -100,6 +100,25 @@ public static class GiImageMetrics
 			return error;
 		}
 	}
+	public static int[] HybridWork(string path)
+	{
+		using (var bitmap = new Bitmap(path))
+		{
+			var result = new int[3];
+			for (int y = 0; y < bitmap.Height; ++y)
+			{
+				for (int x = (int)(bitmap.Width * .65); x < bitmap.Width; ++x)
+				{
+					Color p = bitmap.GetPixel(x, y);
+					// At 1 spp the raw R/G values represent 0, 1 or 2 checks.
+					result[0] += (p.R + 64) / 128;
+					result[1] += (p.G + 64) / 128;
+					result[2] += p.B == 255 ? 1 : 0;
+				}
+			}
+			return result;
+		}
+	}
 	public static double Mse(string referencePath, string samplePath)
 	{
 		using (var reference = new Bitmap(referencePath))

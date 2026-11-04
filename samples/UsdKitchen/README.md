@@ -227,6 +227,8 @@ ReSTIR PTの準備として、`--path-replay` は通常PTの各サンプルを�
 `--restir-pt temporal` または `PT temporal (full primary BSDF)` で、前フレームの生候補1本への時間再接続を試せます。粗さ0.2以上の一次面ではGGXを含むBSDF全体を評価し、平坦なLambert二次面からの反射放射輝度を再利用します。`--gi-view history` で履歴を表示し、`--no-gi-history` で現在の候補だけと比較できます。対象経路と検証手順は [RestirGI.md](../../tests/RestirGI.md) を参照してください。
 
 `--restir-pt hybrid` または `PT hybrid (one glossy bounce)` では、鏡面・低粗さの一次反射を乱数から1回再生し、粗い二次面から保存済みの平坦なLambert頂点へ再接続します。履歴表示では再接続成功が緑、履歴候補の選択がシアン、一次面は一致したものの再生・接続に使える候補がなかった場合が紫です。検証手順は [PtHybrid.md](../../tests/PtHybrid.md) を参照してください。
+
+`--gi-view hybrid-cost` は再生レイ数・可視性チェック数・履歴採用数をRGBで表示します。`--hybrid-unoptimized` で黒い候補への再生も有効にし、通常のhybridと比較できます。
 再帰的な履歴蓄積と空間再利用は未実装です。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 

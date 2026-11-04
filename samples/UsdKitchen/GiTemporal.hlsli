@@ -62,7 +62,7 @@ float giConnectionPdf(GiCandidate source, GiCandidate lightSample)
 
 #include "PtHybrid.hlsli"
 
-float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic)
+float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic, inout uint3 work)
 {
 	float3 fresh = current.reusable != 0 ? shadeGiCandidate(current) : 0;
 	diagnostic = current.sourceValid != 0 ? float3(0.5f, 0.25f, 0) : 0;
@@ -88,20 +88,22 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	float3 currentEstimate = 0;
 	// Only one raw draw is stored, even when the current frame traces several spp.
 	float historyRatio = rcp(float(samplesPerFrame));
-	if (current.valid != 0 && current.reusable != 0)
+	bool skipBlackPaths = giEnabled == 5 && hybridUnoptimized == 0;
+	if (current.valid != 0 && current.reusable != 0 && (!skipBlackPaths || any(current.radiance != 0)))
 	{
 		float3 unusedFactor;
-		float previousPdf = giEnabled == 5 ? hybridConnectionPdf(history, current, unusedFactor) : giConnectionPdf(history, current);
+		float previousPdf = giEnabled == 5 ? hybridConnectionPdf(history, current, unusedFactor, work) : giConnectionPdf(history, current);
 		float jacobian = giEnabled == 5 ? current.areaPdf * current.inversePdf : giConnectionJacobian(current, current.sourcePosition);
 		float3 integrand = current.diffuseBrdfCosine * current.radiance * jacobian;
 		currentEstimate = giBalanceEstimate(integrand, current.areaPdf, previousPdf * historyRatio);
 	}
 	float3 historyEstimate = 0;
 	bool reconnected = false;
-	if (history.valid != 0 && history.reusable != 0)
+	// Keep tracing for the History view, which visualizes connectivity even for black paths.
+	if (history.valid != 0 && history.reusable != 0 && (!skipBlackPaths || giView == 8 || any(history.radiance != 0)))
 	{
 		float3 hybridFactor;
-		float currentPdf = giEnabled == 5 ? hybridConnectionPdf(current, history, hybridFactor) : giConnectionPdf(current, history);
+		float currentPdf = giEnabled == 5 ? hybridConnectionPdf(current, history, hybridFactor, work) : giConnectionPdf(current, history);
 		if (currentPdf > 0 && giEnabled == 5)
 		{
 			reconnected = true;
@@ -127,6 +129,10 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 		^ ((sampleIndex + 1u) * 0x85ebca6bu);
 	bool selectedPrevious;
 	float3 result = resampleGiPair(currentEstimate, historyEstimate, random(state), selectedPrevious);
+	if (giView == 11 && selectedPrevious)
+	{
+		++work.z;
+	}
 	diagnostic = giEnabled == 5 && !reconnected ? float3(0.5f, 0, 0.5f) : float3(0, 0.7f, selectedPrevious ? 1 : 0);
 	return result;
 }

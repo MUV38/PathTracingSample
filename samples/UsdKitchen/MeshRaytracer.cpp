@@ -104,7 +104,7 @@ struct SceneConstants
 	float mEnvironmentRotation = 0.0f;
 	uint32_t mEnvironmentMis = 1;
 	uint32_t mPathReplay = 0;
-	float mPadding2 = 0;
+	uint32_t mHybridUnoptimized = 0;
 	uint32_t mRectangleCount = 0;
 	uint32_t mSampledRectangleCount = 0;
 	std::array<float,2> mRectanglePadding{};
@@ -648,7 +648,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 10 || tracing.mGiMode > 5)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 11 || tracing.mGiMode > 5)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -696,7 +696,8 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRestirDebug = replay ? 0u : tracing.mRestirDebug;
 	const uint32_t minimumGiMode = tracing.mGiView == 8 ? 2u : tracing.mGiView > 0 ? 1u : 0u;
 	constants.mGiEnabled = meshletColors || replay ? 0u
-		: tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
+		: tracing.mGiView == 11 ? 5u : tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
+	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;

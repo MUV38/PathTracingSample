@@ -19,4 +19,5 @@ struct PathTracing
 	bool mGiSpatial = true;
 	uint32_t mGiView = 0;
 	uint32_t mPathReplay = 0;
+	bool mHybridUnoptimized = false;
 };
