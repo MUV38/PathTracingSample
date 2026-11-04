@@ -144,6 +144,26 @@ public static class GiImageMetrics
 			return result;
 		}
 	}
+	public static int[] ReservoirStatus(string path)
+	{
+		using (var bitmap = new Bitmap(path))
+		{
+			var result = new int[2];
+			for (int y = 0; y < bitmap.Height; y += 4)
+			{
+				for (int x = (int)(bitmap.Width * .65); x < bitmap.Width; x += 4)
+				{
+					Color p = bitmap.GetPixel(x, y);
+					result[0] = Math.Max(result[0], p.R);
+					if (p.B == 255)
+					{
+						++result[1];
+					}
+				}
+			}
+			return result;
+		}
+	}
 	public static double Mse(string referencePath, string samplePath)
 	{
 		using (var reference = new Bitmap(referencePath))

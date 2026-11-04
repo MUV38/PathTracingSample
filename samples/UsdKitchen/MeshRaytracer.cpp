@@ -648,7 +648,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 12 || tracing.mGiMode > 5)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 13 || tracing.mGiMode > 6)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -696,7 +696,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mRestirDebug = replay ? 0u : tracing.mRestirDebug;
 	const uint32_t minimumGiMode = tracing.mGiView == 8 ? 2u : tracing.mGiView > 0 ? 1u : 0u;
 	constants.mGiEnabled = meshletColors || replay ? 0u
-		: tracing.mGiView >= 11 ? 5u : tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
+		: tracing.mGiView == 13 ? 6u : tracing.mGiView >= 11 ? 5u : tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
 	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
@@ -729,9 +729,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const size_t giPixels = constants.mGiEnabled != 0 ? static_cast<size_t>(mWidth) * mHeight : 1;
 	if (mGiPixels != giPixels)
 	{
-		auto candidates = createBuffer(mDevice.Get(), giPixels * 160, D3D12_HEAP_TYPE_DEFAULT,
+		auto candidates = createBuffer(mDevice.Get(), giPixels * 164, D3D12_HEAP_TYPE_DEFAULT,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		check(candidates->SetName(L"Diffuse GI / current raw candidates (160 bytes per pixel)"), "Name GI candidates");
+		check(candidates->SetName(L"Diffuse GI / current candidates (164 bytes per pixel)"), "Name GI candidates");
 		mGiCandidates = std::move(candidates);
 		mGiPixels = giPixels;
 		mGiHistoryValid = false;
@@ -741,9 +741,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const size_t previousGiPixels = temporalGi ? giPixels : 1;
 	if (mPreviousGiPixels != previousGiPixels)
 	{
-		auto previous = createBuffer(mDevice.Get(), previousGiPixels * 160, D3D12_HEAP_TYPE_DEFAULT,
+		auto previous = createBuffer(mDevice.Get(), previousGiPixels * 164, D3D12_HEAP_TYPE_DEFAULT,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		check(previous->SetName(L"Diffuse GI / previous raw candidates (not resampled)"), "Name previous GI candidates");
+		check(previous->SetName(L"Diffuse GI / previous candidates or temporal reservoirs"), "Name previous GI candidates");
 		mPreviousGiCandidates = std::move(previous);
 		mPreviousGiPixels = previousGiPixels;
 		mGiHistoryValid = false;
