@@ -136,7 +136,7 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	}
 	// Separate RNG: resampling must not change subsequent PT paths or spp.
 	uint state = (pixel.x + pixel.y * uint(dimensions.x)) ^ ((restirFrame + 1u) * 0x9e3779b9u)
-		^ ((sampleIndex + 1u) * 0x85ebca6bu);
+		^ ((sampleIndex + 1u) * 0x85ebca6bu) ^ (sampleSeed * 0xc2b2ae35u);
 	bool selectedPrevious;
 	float3 result = resampleGiPair(currentEstimate, historyEstimate, random(state), selectedPrevious);
 	if (giView == 11 && selectedPrevious)

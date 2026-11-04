@@ -5,7 +5,8 @@ param(
 	[switch]$Quality,
 	[switch]$Reservoir,
 	[switch]$EvaluateReservoir,
-	[switch]$RepeatBudget
+	[switch]$RepeatBudget,
+	[switch]$DiagnoseHistory
 )
 $ErrorActionPreference = 'Stop'
 if ($RepeatBudget -and !$EvaluateReservoir)
@@ -14,7 +15,11 @@ if ($RepeatBudget -and !$EvaluateReservoir)
 }
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testName = 'pt-hybrid'
-if ($RepeatBudget)
+if ($DiagnoseHistory)
+{
+	$testName = 'pt-history-diagnostics'
+}
+elseif ($RepeatBudget)
 {
 	$testName = 'pt-reservoir-budget-repeats'
 }
@@ -63,6 +68,74 @@ function Capture([string]$name, [string]$fixture, [string]$options)
 	}
 	Write-Host "$name : exit 0"
 	return $png
+}
+
+if ($DiagnoseHistory)
+{
+	$modes = @(
+		@{Name='fresh'; Options='--restir-pt reservoir --no-gi-history'},
+		@{Name='raw'; Options='--restir-pt hybrid'},
+		@{Name='cap2'; Options='--restir-pt reservoir --pt-reservoir-confidence 2'},
+		@{Name='cap8'; Options='--restir-pt reservoir --pt-reservoir-confidence 8'}
+	)
+	$results = foreach ($fixture in @('mirror','glossy'))
+	{
+		$reference = Capture "$fixture-reference" $fixture '--restir-pt reservoir --no-gi-history --samples 2048 --spp 16 --seed 101 --gi-view diffuse'
+		$fixedCount = 0
+		foreach ($mode in $modes)
+		{
+			[string[]]$images = foreach ($seed in 1..6)
+			{
+				$name = "$fixture-$($mode.Name)-seed$seed"
+				$csv = Join-Path $output "$name.csv"
+				$png = Capture $name $fixture ('{0} --samples 128 --spp 1 --seed {1} --gi-view diffuse --gpu-timing "{2}"' -f $mode.Options,$seed,$csv)
+				$timings = @(Import-Csv -LiteralPath $csv)
+				$count = [int]$timings[-1].samples
+				if ($fixedCount -eq 0)
+				{
+					$fixedCount = $count
+				}
+				if ($count -lt 128 -or $count -ne $fixedCount)
+				{
+					throw "Sample count differs: $name"
+				}
+				$png
+			}
+			if ([GiImageMetrics]::MaxDifference($images[0], $images[1]) -eq 0)
+			{
+				throw "Seed did not change the rendered image: $fixture $($mode.Name)"
+			}
+			if ($mode.Name -like 'cap*')
+			{
+				$name = "$fixture-$($mode.Name)"
+				$guideTiming = Join-Path $output "$name-age.csv"
+				$guideOptions = '{0} --samples 128 --spp 1 --seed 1 --gi-view reservoir --gpu-timing "{1}"' -f $mode.Options,$guideTiming
+				$guide = Capture "$name-age" $fixture $guideOptions
+				$guideRows = @(Import-Csv -LiteralPath $guideTiming)
+				if ([int]$guideRows[-1].samples -ne $fixedCount)
+				{
+					throw "Age guide sample count differs: $name"
+				}
+				$map = Join-Path $output "$name-error-age.png"
+				if ([GiImageMetrics]::HistoryErrorMap($reference, $images[0], $guide, $map) -lt 2)
+				{
+					throw "Path did not survive consecutive history selections: $name"
+				}
+			}
+			$errorStats = [GiImageMetrics]::SeedError($reference, $images)
+			[pscustomobject]@{
+				Fixture=$fixture; Mode=$mode.Name; Samples=$fixedCount; Seeds=$images.Length
+				SignedMeanError=$errorStats[0]; Variance=$errorStats[1]; BiasSquaredEstimate=$errorStats[2]; Mse=$errorStats[3]
+			}
+		}
+	}
+	$results | Export-Csv -LiteralPath (Join-Path $output 'seed-error.csv') -NoTypeInformation
+	$results | Format-Table Fixture, Mode, Samples, Seeds,
+		@{Name='MeanError'; Expression={ '{0:E4}' -f $_.SignedMeanError }},
+		@{Name='Variance'; Expression={ '{0:E4}' -f $_.Variance }},
+		@{Name='BiasSquaredEstimate'; Expression={ '{0:E4}' -f $_.BiasSquaredEstimate }},
+		@{Name='Mse'; Expression={ '{0:E4}' -f $_.Mse }}
+	return
 }
 
 if ($EvaluateReservoir)

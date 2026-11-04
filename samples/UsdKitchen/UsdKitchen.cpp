@@ -359,6 +359,25 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mPathReplay = flag == L"--path-replay-check" ? 2u : 1u;
 			continue;
 		}
+		if (flag == L"--seed")
+		{
+			if (index + 1 >= arguments.size())
+			{
+				throw std::runtime_error("--seed expects an unsigned 32-bit integer.");
+			}
+			const auto& value = arguments[++index];
+			if (value.empty() || value.find_first_not_of(L"0123456789") != std::wstring::npos)
+			{
+				throw std::runtime_error("--seed expects an unsigned 32-bit integer.");
+			}
+			const auto seed = std::stoull(value);
+			if (seed > UINT32_MAX)
+			{
+				throw std::runtime_error("--seed expects an unsigned 32-bit integer.");
+			}
+			mTracing.mSeed = static_cast<uint32_t>(seed);
+			continue;
+		}
 		if (flag == L"--pt-reservoir-confidence" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
@@ -992,11 +1011,11 @@ void UsdKitchen::drawGui()
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
 		int view = static_cast<int>(mTracing.mGiView);
-		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0Hybrid quality (R: contribution, G: PDF, B: state)\0PT reservoir (R: confidence, B: history selected)\0");
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0Hybrid quality (R: contribution, G: PDF, B: state)\0PT reservoir (R: confidence, G: age, B: history selected)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
 		ImGui::TextWrapped("Temporal and PT temporal reuse one previous raw candidate. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
 		ImGui::TextWrapped("PT hybrid and PT temporal reservoir replay one glossy bounce, then reconnect from a rough surface to a flat Lambertian vertex. The reservoir saves the selected path and its weight for the next frame. Diagnostic views bypass RR.");
-		ImGui::TextWrapped("164 bytes/pixel per buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
+		ImGui::TextWrapped("168 bytes/pixel per buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
 	{

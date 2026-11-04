@@ -97,7 +97,7 @@ struct SceneConstants
 	float mAmbient = 0.15f;
 	float mShadowBias = 0.0002f;
 	uint32_t mPtReservoirConfidence = 8;
-	float mPadding = 0;
+	uint32_t mSeed = 0;
 	uint32_t mFrameIndex = 0;
 	uint32_t mMaxBounces = 3;
 	uint32_t mSamplesPerFrame = 1;
@@ -700,6 +700,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 		: tracing.mGiView == 13 ? 6u : tracing.mGiView >= 11 ? 5u : tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
 	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
 	constants.mPtReservoirConfidence = std::clamp(tracing.mPtReservoirConfidence, 2u, 8u);
+	constants.mSeed = tracing.mSeed;
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
@@ -731,9 +732,9 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const size_t giPixels = constants.mGiEnabled != 0 ? static_cast<size_t>(mWidth) * mHeight : 1;
 	if (mGiPixels != giPixels)
 	{
-		auto candidates = createBuffer(mDevice.Get(), giPixels * 164, D3D12_HEAP_TYPE_DEFAULT,
+		auto candidates = createBuffer(mDevice.Get(), giPixels * 168, D3D12_HEAP_TYPE_DEFAULT,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-		check(candidates->SetName(L"Diffuse GI / current candidates (164 bytes per pixel)"), "Name GI candidates");
+		check(candidates->SetName(L"Diffuse GI / current candidates (168 bytes per pixel)"), "Name GI candidates");
 		mGiCandidates = std::move(candidates);
 		mGiPixels = giPixels;
 		mGiHistoryValid = false;
@@ -743,7 +744,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const size_t previousGiPixels = temporalGi ? giPixels : 1;
 	if (mPreviousGiPixels != previousGiPixels)
 	{
-		auto previous = createBuffer(mDevice.Get(), previousGiPixels * 164, D3D12_HEAP_TYPE_DEFAULT,
+		auto previous = createBuffer(mDevice.Get(), previousGiPixels * 168, D3D12_HEAP_TYPE_DEFAULT,
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		check(previous->SetName(L"Diffuse GI / previous candidates or temporal reservoirs"), "Name previous GI candidates");
 		mPreviousGiCandidates = std::move(previous);
