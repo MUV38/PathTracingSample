@@ -64,7 +64,8 @@ cbuffer SceneConstants : register(b0)
 	float lightStrength;
 	float ambient;
 	float shadowBias;
-	float2 padding;
+	uint ptReservoirConfidence;
+	float padding;
 	uint frameIndex;
 	uint maxBounces;
 	uint samplesPerFrame;

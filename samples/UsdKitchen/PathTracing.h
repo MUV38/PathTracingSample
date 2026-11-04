@@ -20,4 +20,5 @@ struct PathTracing
 	uint32_t mGiView = 0;
 	uint32_t mPathReplay = 0;
 	bool mHybridUnoptimized = false;
+	uint32_t mPtReservoirConfidence = 8;
 };

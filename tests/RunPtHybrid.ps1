@@ -3,12 +3,17 @@ param(
 	[string]$Configuration = 'Debug',
 	[switch]$CompareCost,
 	[switch]$Quality,
-	[switch]$Reservoir
+	[switch]$Reservoir,
+	[switch]$EvaluateReservoir
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testName = 'pt-hybrid'
-if ($Reservoir)
+if ($EvaluateReservoir)
+{
+	$testName = 'pt-reservoir-eval'
+}
+elseif ($Reservoir)
 {
 	$testName = 'pt-reservoir'
 }
@@ -49,6 +54,72 @@ function Capture([string]$name, [string]$fixture, [string]$options)
 	}
 	Write-Host "$name : exit 0"
 	return $png
+}
+
+if ($EvaluateReservoir)
+{
+	$modes = @(
+		@{Name='fresh'; Options='--restir-pt reservoir --no-gi-history'},
+		@{Name='raw'; Options='--restir-pt hybrid'}
+	)
+	foreach ($cap in @(2,4,8))
+	{
+		$modes += @{Name="cap$cap"; Options="--restir-pt reservoir --pt-reservoir-confidence $cap"}
+		$guide = Capture "guide-cap$cap" 'mirror' "--gi-view reservoir --pt-reservoir-confidence $cap --samples 16 --spp 1"
+		$status = [GiImageMetrics]::ReservoirStatus($guide)
+		if ([Math]::Abs($status[0] - 255.0 * $cap / 8) -gt .5 -or $status[1] -lt 20)
+		{
+			throw "Reservoir did not reach confidence $cap or select history."
+		}
+	}
+	$results = foreach ($fixture in @('mirror','glossy'))
+	{
+		$referenceOptions = '--restir-pt reservoir --no-gi-history --samples 2048 --spp 16'
+		$references = @{
+			Indirect = Capture "$fixture-reference-indirect" $fixture "$referenceOptions --gi-view diffuse"
+			Total = Capture "$fixture-reference-total" $fixture $referenceOptions
+		}
+		foreach ($test in @(
+			@{Name='fixed-indirect'; Component='Indirect'; Options='--samples 128 --gi-view diffuse'; Fixed=$true},
+			@{Name='budget-indirect'; Component='Indirect'; Options='--samples 1 --gpu-budget-ms 1000 --gi-view diffuse'; Fixed=$false},
+			@{Name='budget-total'; Component='Total'; Options='--samples 1 --gpu-budget-ms 1000'; Fixed=$false}
+		))
+		{
+			$fixedCount = 0
+			foreach ($mode in $modes)
+			{
+				$name = "$fixture-$($test.Name)-$($mode.Name)"
+				$csv = Join-Path $output "$name.csv"
+				$png = Capture $name $fixture ('{0} {1} --spp 1 --gpu-timing "{2}"' -f $mode.Options,$test.Options,$csv)
+				$rows = @(Import-Csv -LiteralPath $csv)
+				$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
+				if ($rows.Count -lt 8)
+				{
+					throw "Missing GPU timing rows: $name"
+				}
+				$count = [int]$rows[-1].samples
+				if ($test.Fixed)
+				{
+					if ($fixedCount -eq 0)
+					{
+						$fixedCount = $count
+					}
+					if ($count -lt 128 -or $count -ne $fixedCount)
+					{
+						throw "Sample count differs: $name"
+					}
+				}
+				elseif ($stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
+				{
+					throw "Unexpected GPU budget: $name"
+				}
+				[pscustomobject]@{Fixture=$fixture; Test=$test.Name; Mode=$mode.Name; GpuMilliseconds=$stats.Sum; Samples=$count; LuminanceMse=[GiImageMetrics]::Mse($references[$test.Component],$png)}
+			}
+		}
+	}
+	$results | Export-Csv -LiteralPath (Join-Path $output 'evaluation.csv') -NoTypeInformation
+	$results | Format-Table Fixture, Test, Mode, GpuMilliseconds, Samples, @{Name='LuminanceMse'; Expression={ '{0:E4}' -f $_.LuminanceMse }}
+	return
 }
 
 if ($Reservoir)

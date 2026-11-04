@@ -24,7 +24,7 @@ float3 temporalPtReservoir(GiCandidate current, uint2 pixel, uint sampleIndex, o
 	}
 	// Partition the joint (prefix random triplet, endpoint area) domain by support.
 	// Confidence depends on source compatibility, not on the selected path's value.
-	float alpha = min(history.confidence, 7) / float(samplesPerFrame);
+	float alpha = min(history.confidence, float(ptReservoirConfidence - 1u)) / float(samplesPerFrame);
 	float historyShare = alpha / (1 + alpha);
 	uint3 unusedWork = 0;
 	float3 currentF = current.diffuseBrdfCosine * current.radiance * (current.areaPdf * current.inversePdf);
