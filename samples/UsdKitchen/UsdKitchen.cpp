@@ -347,11 +347,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--restir-pt" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			if (value != L"temporal" && value != L"hybrid" && value != L"off")
+			if (value != L"temporal" && value != L"hybrid" && value != L"reservoir" && value != L"off")
 			{
-				throw std::runtime_error("--restir-pt expects off, temporal, or hybrid.");
+				throw std::runtime_error("--restir-pt expects off, temporal, hybrid, or reservoir.");
 			}
-			mTracing.mGiMode = value == L"hybrid" ? 5u : value == L"temporal" ? 4u : 0u;
+			mTracing.mGiMode = value == L"reservoir" ? 6u : value == L"hybrid" ? 5u : value == L"temporal" ? 4u : 0u;
 			continue;
 		}
 		if (flag == L"--path-replay" || flag == L"--path-replay-check")
@@ -377,11 +377,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--gi-view" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			const std::array<std::wstring,13> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy", L"spatial", L"hybrid-cost", L"hybrid-quality"};
+			const std::array<std::wstring,14> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy", L"spatial", L"hybrid-cost", L"hybrid-quality", L"reservoir" };
 			const auto view = std::find(views.begin(), views.end(), value);
 			if (view == views.end())
 			{
-				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, diffuse-noisy, spatial, hybrid-cost, or hybrid-quality.");
+				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, diffuse-noisy, spatial, hybrid-cost, hybrid-quality, or reservoir.");
 			}
 			mTracing.mGiView = static_cast<uint32_t>(view - views.begin());
 			continue;
@@ -975,16 +975,16 @@ void UsdKitchen::drawGui()
 	if (ImGui::CollapsingHeader("ReSTIR GI"))
 	{
 		int mode = static_cast<int>(mTracing.mGiMode);
-		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0PT temporal (full primary BSDF)\0PT hybrid (one glossy bounce)\0");
+		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0PT temporal (full primary BSDF)\0PT hybrid (one glossy bounce)\0PT temporal reservoir\0");
 		mTracing.mGiMode = static_cast<uint32_t>(mode);
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
 		int view = static_cast<int>(mTracing.mGiView);
-		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0Hybrid quality (R: contribution, G: PDF, B: state)\0");
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0Hybrid quality (R: contribution, G: PDF, B: state)\0PT reservoir (R: confidence, B: history selected)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
-		ImGui::TextWrapped("Temporal modes reuse one previous raw candidate with balance MIS on flat Lambertian secondary surfaces. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
-		ImGui::TextWrapped("PT hybrid replays one glossy primary bounce, then reconnects from a rough surface to a flat Lambertian vertex. In both PT modes the Diffuse indirect views show the reconnectable contribution. Diagnostic views bypass RR.");
-		ImGui::TextWrapped("160 bytes/pixel per raw buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
+		ImGui::TextWrapped("Temporal and PT temporal reuse one previous raw candidate. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
+		ImGui::TextWrapped("PT hybrid and PT temporal reservoir replay one glossy bounce, then reconnect from a rough surface to a flat Lambertian vertex. The reservoir saves the selected path and its weight for the next frame. Diagnostic views bypass RR.");
+		ImGui::TextWrapped("164 bytes/pixel per buffer. Temporal/spatial modes use two buffers; only the first sample is saved. Spatial mode adds a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))
 	{

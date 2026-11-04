@@ -36,7 +36,7 @@ float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 facto
 	}
 	Surface middle = pathSurface(payload, materials[payload.materialIndex]);
 	float jacobian = giConnectionJacobian(path, middle.position);
-	if (middle.roughness < 0.2f || jacobian <= 0)
+	if (middle.roughness < 0.2f || jacobian <= 0 || (giEnabled == 6 && middle.occlusion <= 0))
 	{
 		return 0;
 	}

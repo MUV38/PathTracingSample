@@ -347,6 +347,7 @@ Surface pathSurface(Payload payload, Material material)
 	return surface;
 }
 #include "GiTemporal.hlsli"
+#include "PtReservoir.hlsli"
 #include "GiSpatial.hlsli"
 #include "RayReconstruction.hlsli"
 void recordPathValue(inout uint digest, uint value)
@@ -480,7 +481,7 @@ void RGS_Main()
 		float3 diffuseRatio = 0;
 		float3 connectionPosition = 0;
 		bool hybridPrefix = false;
-		uint connectionDepth = giEnabled == 5 ? 2u : 1u;
+		uint connectionDepth = giEnabled >= 5 ? 2u : 1u;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
@@ -571,7 +572,7 @@ void RGS_Main()
 				candidate.sourceView = view;
 				bool diffuseSource = surface.metallic < 1
 					&& maxComponent(surface.baseColor * (1 - fresnelSchlick(materialF0(surface), dot(surface.normal, view)))) > 0;
-				bool supportedSource = giEnabled == 5 ? surface.roughness < 0.2f && maxBounces >= 2
+				bool supportedSource = giEnabled >= 5 ? surface.roughness < 0.2f && maxBounces >= 2
 					: surface.roughness >= 0.2f && (giEnabled == 4 || diffuseSource);
 				candidate.sourceValid = supportedSource && surface.occlusion > 0 ? 1u : 0u;
 			}
@@ -670,7 +671,7 @@ void RGS_Main()
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
-			if (giEnabled == 5 && depth == 0 && candidate.sourceValid != 0)
+			if (giEnabled >= 5 && depth == 0 && candidate.sourceValid != 0)
 			{
 				candidate.prefixSample = u;
 				hybridPrefix = u.z < specularProbability(surface, view);
@@ -708,7 +709,7 @@ void RGS_Main()
 			}
 			missWeight = 1.0f;
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
-			if (giEnabled != 0 && giEnabled != 5 && depth == 0 && !delta)
+			if (giEnabled != 0 && giEnabled < 5 && depth == 0 && !delta)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
@@ -729,7 +730,7 @@ void RGS_Main()
 					diffuseRatio = giEnabled == 4 ? 1 : select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
 				}
 			}
-			if (giEnabled == 5 && depth == 1 && hybridPrefix && surface.roughness >= 0.2f)
+			if (giEnabled >= 5 && depth == 1 && hybridPrefix && surface.roughness >= 0.2f)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
@@ -784,7 +785,6 @@ void RGS_Main()
 			recordedRadiance = radiance;
 		}
 		candidate.radiance = suffixRadiance;
-		candidate.targetDensity = dot(max(candidate.diffuseBrdfCosine * suffixRadiance, 0), float3(0.2126f, 0.7152f, 0.0722f));
 		if (giCandidatePrepass)
 		{
 			giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
@@ -801,9 +801,18 @@ void RGS_Main()
 		float3 freshGi = diffuseGi;
 		float3 sampleHistoryColor = 0;
 		float3 sampleSpatialColor = 0;
+		GiCandidate stored = candidate;
 		if (giUseSpatial != 0)
 		{
 			diffuseGi = spatialGi(candidate, pixel, sampleIndex, sampleHistoryColor, sampleSpatialColor);
+		}
+		else if (giEnabled == 6)
+		{
+			diffuseGi = temporalPtReservoir(candidate, pixel, sampleIndex, stored, sampleHistoryColor);
+			if (giView == 13)
+			{
+				sampleHistoryColor = float3(stored.confidence / 8, 0, sampleHistoryColor.b);
+			}
 		}
 		else if (giEnabled >= 2)
 		{
@@ -817,7 +826,7 @@ void RGS_Main()
 			{
 				if (giUseSpatial == 0)
 				{
-					giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = candidate;
+					giCandidates[pixel.x + pixel.y * DispatchRaysDimensions().x] = stored;
 				}
 				historyColor = sampleHistoryColor;
 				spatialColor = sampleSpatialColor;
@@ -857,7 +866,7 @@ void RGS_Main()
 	{
 		outputImage[pixel] = replayMismatch ? float4(1, 0, 1, 1) : float4(0, 1, longestPath > 1 ? 1 : 0, 1);
 	}
-	if (giView == 8 || giView == 12)
+	if (giView == 8 || giView == 12 || giView == 13)
 	{
 		outputImage[pixel] = float4(historyColor, 1);
 	}

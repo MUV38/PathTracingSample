@@ -2,12 +2,17 @@ param(
 	[ValidateSet('Debug', 'Release')]
 	[string]$Configuration = 'Debug',
 	[switch]$CompareCost,
-	[switch]$Quality
+	[switch]$Quality,
+	[switch]$Reservoir
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testName = 'pt-hybrid'
-if ($Quality)
+if ($Reservoir)
+{
+	$testName = 'pt-reservoir'
+}
+elseif ($Quality)
 {
 	$testName = 'pt-hybrid-quality'
 }
@@ -44,6 +49,75 @@ function Capture([string]$name, [string]$fixture, [string]$options)
 	}
 	Write-Host "$name : exit 0"
 	return $png
+}
+
+if ($Reservoir)
+{
+	$modes = @(
+		@{Name='fresh'; Options='--restir-pt reservoir --no-gi-history'},
+		@{Name='raw'; Options='--restir-pt hybrid'},
+		@{Name='reservoir'; Options='--restir-pt reservoir'}
+	)
+	$energy = foreach ($fixture in @('mirror','glossy'))
+	{
+		$png = Capture "$fixture-reference" $fixture '--samples 2048 --spp 16'
+		$reference = [GiImageMetrics]::Read($png)
+		foreach ($mode in $modes)
+		{
+			$png = Capture "$fixture-$($mode.Name)" $fixture "$($mode.Options) --samples 512 --spp 4"
+			$actual = [GiImageMetrics]::Read($png)
+			for ($channel = 0; $channel -lt 3; ++$channel)
+			{
+				if ([Math]::Abs($actual[$channel] - $reference[$channel]) -gt (0.0003 + .04 * $reference[$channel]))
+				{
+					throw "Unexpected RGB mean for $fixture / $($mode.Name), channel $channel"
+				}
+			}
+			[pscustomobject]@{Fixture=$fixture; Mode=$mode.Name; Reference=$reference[3]; Luminance=$actual[3]}
+		}
+	}
+	$energy | Export-Csv -LiteralPath (Join-Path $output 'energy.csv') -NoTypeInformation
+	$guide = Capture 'warm' 'mirror' '--gi-view reservoir --samples 16'
+	$warm = [GiImageMetrics]::ReservoirStatus($guide)
+	if ($warm[0] -ne 255 -or $warm[1] -lt 20)
+	{
+		throw 'Reservoir confidence did not accumulate or the previous path was not selected.'
+	}
+	$guide = Capture 'black' 'mirror' '--gi-view reservoir --bounces 2 --no-emissive-mis --samples 16'
+	$black = [GiImageMetrics]::ReservoirStatus($guide)
+	if ($black[0] -ne 255 -or $black[1] -ne 0)
+	{
+		throw 'Black paths must retain proposal confidence without selecting history.'
+	}
+	$csv = Join-Path $output 'camera.csv'
+	$null = Capture 'motion' 'occlusion' ('--gi-view reservoir --samples 1 --screenshot-count 32 --gi-validation "{0}"' -f $csv)
+	$rows = @(Import-Csv -LiteralPath $csv)
+	$cut = $rows | Where-Object event -eq 'cut' | Select-Object -First 1
+	if (!$cut -or $cut.history -ne '0')
+	{
+		throw 'Expected camera cut to reset history.'
+	}
+	$index = [int]$cut.frame - ($rows.Count - 32)
+	$reset = [GiImageMetrics]::ReservoirStatus((Join-Path $output ('motion-{0:D4}.png' -f $index)))
+	if ($reset[0] -gt 32 -or $reset[1] -ne 0)
+	{
+		throw 'The camera cut retained reservoir confidence or selected history.'
+	}
+	$budget = foreach ($mode in $modes)
+	{
+		$csv = Join-Path $output "budget-$($mode.Name).csv"
+		$png = Capture "budget-$($mode.Name)" 'mirror' ('{0} --samples 1 --gpu-budget-ms 1000 --gpu-timing "{1}"' -f $mode.Options,$csv)
+		$rows = @(Import-Csv -LiteralPath $csv)
+		$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
+		if ($rows.Count -lt 8 -or $stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
+		{
+			throw "Unexpected GPU budget for $($mode.Name)"
+		}
+		[pscustomobject]@{Mode=$mode.Name; GpuMilliseconds=$stats.Sum; Samples=[int]$rows[-1].samples; LuminanceMse=[GiImageMetrics]::Mse((Join-Path $output 'mirror-reference.png'),$png)}
+	}
+	$budget | Export-Csv -LiteralPath (Join-Path $output 'budget.csv') -NoTypeInformation
+	$budget | Format-Table Mode, GpuMilliseconds, Samples, @{Name='LuminanceMse'; Expression={ '{0:E4}' -f $_.LuminanceMse }}
+	return
 }
 
 if ($Quality)

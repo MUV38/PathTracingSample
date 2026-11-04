@@ -231,6 +231,8 @@ ReSTIR PTの準備として、`--path-replay` は通常PTの各サンプルを�
 `--gi-view hybrid-cost` は再生レイ数・可視性チェック数・履歴採用数をRGBで表示します。`--hybrid-unoptimized` で黒い候補への再生も有効にし、通常のhybridと比較できます。
 
 `--gi-view hybrid-quality` は、前フレーム候補を現在の視点に再接続したときの寄与と面積PDFの変化を表示します。赤と緑の中央の明るさが変化なし、青が接続状態です。CSVへの集計手順と色の対応は [PtHybrid.md](../../tests/PtHybrid.md) を参照してください。
+
+`--restir-pt reservoir` または `PT temporal reservoir` は、再選択した経路と寄与の重みを翌フレームへ引き継ぐ実験モードです。`--gi-view reservoir` の赤で履歴の信頼度、青で前フレームの経路の選択を確認できます。`--no-gi-history` で現在候補だけと比較できます。
 再帰的な履歴蓄積と空間再利用は未実装です。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 

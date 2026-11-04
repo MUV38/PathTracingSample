@@ -13,7 +13,7 @@ struct GiCandidate
 	float3 diffuseBrdfCosine;
 	float inversePdf;
 	float3 prefixSample;
-	float targetDensity;
+	float contributionWeight;
 	float3 sourceNormal;
 	uint sourceMaterial;
 	float3 sourceGeometricNormal;
@@ -22,7 +22,8 @@ struct GiCandidate
 	uint reusable;
 	float3 sourceView;
 	uint prefixTriangle;
-}; // 160 bytes; renderer allocation must match.
+	float confidence;
+}; // 164 bytes; renderer allocation must match.
 
 float3 giDiffuseBrdfCosine(Surface surface, float3 view, float3 direction)
 {
