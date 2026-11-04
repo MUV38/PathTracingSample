@@ -332,6 +332,20 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(proposalPdf, bsdfPdf) / proposalPdf;
 }
 #include "RestirPasses.hlsli"
+Surface pathSurface(Payload payload, Material material)
+{
+	Surface surface;
+	surface.singleScatterOnly = multipleScattering == 0;
+	surface.position = payload.position;
+	surface.normal = payload.normal;
+	surface.geometricNormal = payload.geometricNormal;
+	surface.baseColor = saturate(payload.color * material.baseColor);
+	surface.metallic = material.metallic;
+	surface.roughness = material.roughness;
+	surface.specular = material.specular;
+	surface.occlusion = material.occlusion;
+	return surface;
+}
 #include "GiTemporal.hlsli"
 #include "GiSpatial.hlsli"
 #include "RayReconstruction.hlsli"
@@ -463,6 +477,9 @@ void RGS_Main()
 		float3 suffixRadiance = 0;
 		float3 referenceDiffuse = 0;
 		float3 diffuseRatio = 0;
+		float3 connectionPosition = 0;
+		bool hybridPrefix = false;
+		uint connectionDepth = giEnabled == 5 ? 2u : 1u;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
@@ -511,7 +528,7 @@ void RGS_Main()
 					}
 				}
 				addGiPathRadiance(rectangleEmission(rectangle, ray.Direction) * weight, throughput,
-					candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
+					candidate.valid != 0 && depth > connectionDepth, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				break;
 			}
 			if (payload.hit == 0)
@@ -521,7 +538,7 @@ void RGS_Main()
 					recordPathValue(pathHash, 0u);
 				}
 				addGiPathRadiance(payload.color * missWeight, throughput,
-					candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
+					candidate.valid != 0 && depth > connectionDepth, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				break;
 			}
 			Material material = materials[payload.materialIndex];
@@ -531,16 +548,7 @@ void RGS_Main()
 				recordPathValue(pathHash, payload.triangleIndex);
 				recordPathVector(pathHash, payload.position);
 			}
-			Surface surface;
-			surface.singleScatterOnly = multipleScattering == 0;
-			surface.position = payload.position;
-			surface.normal = payload.normal;
-			surface.geometricNormal = payload.geometricNormal;
-			surface.baseColor = saturate(payload.color * material.baseColor);
-			surface.metallic = material.metallic;
-			surface.roughness = material.roughness;
-			surface.specular = material.specular;
-			surface.occlusion = material.occlusion;
+			Surface surface = pathSurface(payload, material);
 			if (meshletColors > 0.5f)
 			{
 				surface.baseColor = payload.color;
@@ -562,13 +570,15 @@ void RGS_Main()
 				candidate.sourceView = view;
 				bool diffuseSource = surface.metallic < 1
 					&& maxComponent(surface.baseColor * (1 - fresnelSchlick(materialF0(surface), dot(surface.normal, view)))) > 0;
-				candidate.sourceValid = surface.roughness >= 0.2f && surface.occlusion > 0 && (giEnabled == 4 || diffuseSource) ? 1u : 0u;
+				bool supportedSource = giEnabled == 5 ? surface.roughness < 0.2f && maxBounces >= 2
+					: surface.roughness >= 0.2f && (giEnabled == 4 || diffuseSource);
+				candidate.sourceValid = supportedSource && surface.occlusion > 0 ? 1u : 0u;
 			}
-			if (giEnabled != 0 && depth == 1 && candidate.solidAnglePdf > 0)
+			if (giEnabled != 0 && depth == connectionDepth && candidate.solidAnglePdf > 0)
 			{
 				candidate.position = payload.position;
 				candidate.normal = payload.geometricNormal;
-				candidate.areaPdf = giAreaPdf(candidate.solidAnglePdf, candidate.sourcePosition, candidate.position, candidate.normal);
+				candidate.areaPdf = giAreaPdf(candidate.solidAnglePdf, connectionPosition, candidate.position, candidate.normal);
 				candidate.valid = candidate.areaPdf > 0 && isfinite(candidate.areaPdf) ? 1u : 0u;
 				// Exact direction-independent radiance only: flat-normal Lambertian secondary surfaces.
 				candidate.reusable = material.metallic == 0 && material.specular == 0 && payload.flatNormal != 0 ? 1u : 0u;
@@ -598,7 +608,7 @@ void RGS_Main()
 			// Emission at the secondary surface is direct lighting of the primary:
 			// keep it (and its existing MIS weight) outside the diffuse GI candidate.
 			addGiPathRadiance(material.emissiveColor * material.emissiveStrength * emissionWeight, throughput,
-				candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
+				candidate.valid != 0 && depth > connectionDepth, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			addGiPathRadiance(directLighting(surface, view), throughput, candidate.valid != 0,
 				suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			if (depth == maxBounces)
@@ -659,6 +669,11 @@ void RGS_Main()
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
+			if (giEnabled == 5 && depth == 0 && candidate.sourceValid != 0)
+			{
+				candidate.prefixSample = u;
+				hybridPrefix = u.z < specularProbability(surface, view);
+			}
 			if (!sampleBsdf(surface, view, u, nextDirection, weight))
 			{
 				break;
@@ -692,7 +707,7 @@ void RGS_Main()
 			}
 			missWeight = 1.0f;
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
-			if (giEnabled != 0 && depth == 0 && !delta)
+			if (giEnabled != 0 && giEnabled != 5 && depth == 0 && !delta)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
@@ -709,9 +724,20 @@ void RGS_Main()
 					candidate.solidAnglePdf = pdf;
 					candidate.inversePdf = rcp(pdf);
 					candidate.diffuseBrdfCosine = factor;
-					candidate.direction = nextDirection;
+					connectionPosition = surface.position;
 					diffuseRatio = giEnabled == 4 ? 1 : select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
 				}
+			}
+			if (giEnabled == 5 && depth == 1 && hybridPrefix && surface.roughness >= 0.2f)
+			{
+				float pdf;
+				evaluateBsdf(surface, view, nextDirection, pdf);
+				candidate.prefixTriangle = payload.triangleIndex;
+				candidate.solidAnglePdf = pdf;
+				candidate.inversePdf = rcp(pdf);
+				candidate.diffuseBrdfCosine = throughput * pdf;
+				connectionPosition = surface.position;
+				diffuseRatio = 1;
 			}
 			if (environmentMis != 0 && environmentIntensity > 0.0f && !delta)
 			{
