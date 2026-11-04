@@ -12,7 +12,7 @@ struct GiCandidate
 	uint sourceTriangle;
 	float3 diffuseBrdfCosine;
 	float inversePdf;
-	float3 direction;
+	float3 prefixSample;
 	float targetDensity;
 	float3 sourceNormal;
 	uint sourceMaterial;
@@ -21,7 +21,7 @@ struct GiCandidate
 	float3 sourceBaseColor;
 	uint reusable;
 	float3 sourceView;
-	uint padding;
+	uint prefixTriangle;
 }; // 160 bytes; renderer allocation must match.
 
 float3 giDiffuseBrdfCosine(Surface surface, float3 view, float3 direction)

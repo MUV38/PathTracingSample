@@ -60,6 +60,8 @@ float giConnectionPdf(GiCandidate source, GiCandidate lightSample)
 	return pdf * jacobian;
 }
 
+#include "PtHybrid.hlsli"
+
 float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic)
 {
 	float3 fresh = current.reusable != 0 ? shadeGiCandidate(current) : 0;
@@ -88,15 +90,24 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	float historyRatio = rcp(float(samplesPerFrame));
 	if (current.valid != 0 && current.reusable != 0)
 	{
-		float previousPdf = giConnectionPdf(history, current);
-		float3 integrand = current.diffuseBrdfCosine * current.radiance * giConnectionJacobian(current, current.sourcePosition);
+		float3 unusedFactor;
+		float previousPdf = giEnabled == 5 ? hybridConnectionPdf(history, current, unusedFactor) : giConnectionPdf(history, current);
+		float jacobian = giEnabled == 5 ? current.areaPdf * current.inversePdf : giConnectionJacobian(current, current.sourcePosition);
+		float3 integrand = current.diffuseBrdfCosine * current.radiance * jacobian;
 		currentEstimate = giBalanceEstimate(integrand, current.areaPdf, previousPdf * historyRatio);
 	}
 	float3 historyEstimate = 0;
+	bool reconnected = false;
 	if (history.valid != 0 && history.reusable != 0)
 	{
-		float currentPdf = giConnectionPdf(current, history);
-		if (currentPdf > 0)
+		float3 hybridFactor;
+		float currentPdf = giEnabled == 5 ? hybridConnectionPdf(current, history, hybridFactor) : giConnectionPdf(current, history);
+		if (currentPdf > 0 && giEnabled == 5)
+		{
+			reconnected = true;
+			historyEstimate = giBalanceEstimate(hybridFactor * history.radiance, currentPdf, history.areaPdf * historyRatio) * historyRatio;
+		}
+		else if (currentPdf > 0)
 		{
 			Surface surface = giSourceSurface(current);
 			float3 direction = normalize(history.position - surface.position);
@@ -116,6 +127,6 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 		^ ((sampleIndex + 1u) * 0x85ebca6bu);
 	bool selectedPrevious;
 	float3 result = resampleGiPair(currentEstimate, historyEstimate, random(state), selectedPrevious);
-	diagnostic = float3(0, 0.7f, selectedPrevious ? 1 : 0);
+	diagnostic = giEnabled == 5 && !reconnected ? float3(0.5f, 0, 0.5f) : float3(0, 0.7f, selectedPrevious ? 1 : 0);
 	return result;
 }

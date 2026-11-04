@@ -140,12 +140,21 @@ int wmain(int count, wchar_t** arguments)
 		testDistribution();
 		const std::filesystem::path directory = arguments[1];
 		std::filesystem::create_directories(directory);
-		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored", L"gi-rough-metal"})
+		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored", L"gi-rough-metal", L"pt-hybrid-mirror", L"pt-hybrid-glossy"})
 		{
 			const std::wstring mode = name;
 			const bool roughMetal = mode == L"gi-rough-metal";
+			const bool hybrid = mode == L"pt-hybrid-mirror" || mode == L"pt-hybrid-glossy";
 			const bool gi = mode == L"gi-colored" || roughMetal;
-			auto scene = fixture(mode == L"shadow" || gi, mode == L"mirror", mode == L"multiple" || gi, mode == L"dark");
+			auto scene = fixture(mode == L"shadow" || gi, mode == L"mirror" || hybrid, mode == L"multiple" || gi || hybrid, mode == L"dark");
+			if (hybrid)
+			{
+				scene.mMaterials[0].mRoughness = mode == L"pt-hybrid-glossy" ? 0.12f : 0.0f;
+				scene.mMaterials.emplace_back();
+				scene.mMaterials[3].mSpecular = 0;
+				quad(scene, {-2,0,-2}, {-2,2,-2}, {2,2,-2}, {2,0,-2}, {0,0,1}, 3);
+				quad(scene, {-2,0,2}, {-2,2,2}, {-2,2,-2}, {-2,0,-2}, {1,0,0}, 3);
+			}
 			if (gi)
 			{
 				// A GGX+diffuse primary floor, Lambertian secondary blocker, two colored emitters.
@@ -169,7 +178,7 @@ int wmain(int count, wchar_t** arguments)
 			writeSceneFile(path, scene);
 			const auto loaded = readSceneFile(path);
 			auto lights = createMeshLights(loaded.mVertices, meshletTriangleIndices(loaded));
-			const uint32_t expected = mode == L"dark" ? 0 : (mode == L"multiple" || gi) ? 4 : 2;
+			const uint32_t expected = mode == L"dark" ? 0 : (mode == L"multiple" || gi || hybrid) ? 4 : 2;
 			require(updateMeshLightDistribution(lights, loaded.mMaterials) == expected, "Fixture lost its emissive triangles.");
 		}
 		std::cout << "Mesh light CPU tests passed; fixtures: " << directory.string() << '\n';
