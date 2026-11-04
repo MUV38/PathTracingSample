@@ -62,3 +62,19 @@ float hybridConnectionPdf(GiCandidate source, GiCandidate path, out float3 facto
 	factor = prefixWeight * bsdf * saturate(dot(middle.normal, connection)) * middle.occlusion * jacobian;
 	return pdf * jacobian;
 }
+
+float3 hybridShiftQuality(GiCandidate history, float3 shiftedFactor, float shiftedPdf)
+{
+	const float3 luminance = float3(0.2126f, 0.7152f, 0.0722f);
+	float oldJacobian = history.areaPdf * history.inversePdf;
+	float oldContribution = dot(history.diffuseBrdfCosine * history.radiance * oldJacobian, luminance);
+	float newContribution = dot(shiftedFactor * history.radiance, luminance);
+	if (oldContribution <= 0 || newContribution < 0 || history.areaPdf <= 0 || shiftedPdf <= 0
+		|| !all(isfinite(float4(oldContribution, newContribution, history.areaPdf, shiftedPdf))))
+	{
+		return float3(0, 0, 1); // Valid connection, ratio undefined.
+	}
+	float contributionStops = newContribution > 0 ? log2(newContribution) - log2(oldContribution) : -8;
+	float pdfStops = log2(shiftedPdf) - log2(history.areaPdf);
+	return float3(saturate(0.5f + float2(contributionStops, pdfStops) / 16), 4.0f / 5);
+}

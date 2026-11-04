@@ -65,14 +65,15 @@ float giConnectionPdf(GiCandidate source, GiCandidate lightSample)
 float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic, inout uint3 work)
 {
 	float3 fresh = current.reusable != 0 ? shadeGiCandidate(current) : 0;
-	diagnostic = current.sourceValid != 0 ? float3(0.5f, 0.25f, 0) : 0;
+	bool showShiftQuality = giView == 12;
+	diagnostic = !showShiftQuality && current.sourceValid != 0 ? float3(0.5f, 0.25f, 0) : 0;
 	if (giHistoryValid == 0 || current.sourceValid == 0)
 	{
 		return fresh;
 	}
 	float2 dimensions = float2(DispatchRaysDimensions().xy);
 	float2 previousPixel = reprojectPrimary(current.sourcePosition, previousViewProjection, dimensions, previousViewportLeft);
-	diagnostic = float3(1, 0, 0);
+	diagnostic = showShiftQuality ? float3(0, 0, 1.0f / 5) : float3(1, 0, 0);
 	if (!all(isfinite(previousPixel)) || any(previousPixel < float2(previousViewportLeft, 0)) || any(previousPixel >= dimensions))
 	{
 		return fresh;
@@ -99,6 +100,11 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	}
 	float3 historyEstimate = 0;
 	bool reconnected = false;
+	if (showShiftQuality)
+	{
+		bool hasCandidate = history.valid != 0 && history.reusable != 0 && any(history.radiance != 0);
+		diagnostic = float3(0, 0, hasCandidate ? 3.0f / 5 : 2.0f / 5);
+	}
 	// Keep tracing for the History view, which visualizes connectivity even for black paths.
 	if (history.valid != 0 && history.reusable != 0 && (!skipBlackPaths || giView == 8 || any(history.radiance != 0)))
 	{
@@ -107,6 +113,10 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 		if (currentPdf > 0 && giEnabled == 5)
 		{
 			reconnected = true;
+			if (showShiftQuality && any(history.radiance != 0))
+			{
+				diagnostic = hybridShiftQuality(history, hybridFactor, currentPdf);
+			}
 			historyEstimate = giBalanceEstimate(hybridFactor * history.radiance, currentPdf, history.areaPdf * historyRatio) * historyRatio;
 		}
 		else if (currentPdf > 0)
@@ -133,6 +143,9 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 	{
 		++work.z;
 	}
-	diagnostic = giEnabled == 5 && !reconnected ? float3(0.5f, 0, 0.5f) : float3(0, 0.7f, selectedPrevious ? 1 : 0);
+	if (!showShiftQuality)
+	{
+		diagnostic = giEnabled == 5 && !reconnected ? float3(0.5f, 0, 0.5f) : float3(0, 0.7f, selectedPrevious ? 1 : 0);
+	}
 	return result;
 }

@@ -377,11 +377,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--gi-view" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			const std::array<std::wstring,12> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy", L"spatial", L"hybrid-cost"};
+			const std::array<std::wstring,13> views{L"output", L"diffuse", L"remainder", L"radiance", L"normal", L"pdf", L"valid", L"error", L"history", L"diffuse-noisy", L"spatial", L"hybrid-cost", L"hybrid-quality"};
 			const auto view = std::find(views.begin(), views.end(), value);
 			if (view == views.end())
 			{
-				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, diffuse-noisy, spatial, or hybrid-cost.");
+				throw std::runtime_error("--gi-view expects output, diffuse, remainder, radiance, normal, pdf, valid, error, history, diffuse-noisy, spatial, hybrid-cost, or hybrid-quality.");
 			}
 			mTracing.mGiView = static_cast<uint32_t>(view - views.begin());
 			continue;
@@ -980,7 +980,7 @@ void UsdKitchen::drawGui()
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
 		int view = static_cast<int>(mTracing.mGiView);
-		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0");
+		ImGui::Combo("GI view", &view, "Output\0Diffuse indirect\0Remainder\0Secondary radiance\0Secondary normal\0PDF (R: solid angle, G: area)\0Valid candidate\0Fresh reconstruction error x1000\0History (green: accepted, blue: selected)\0Diffuse indirect (noisy)\0Spatial (green: accepted, blue: selected)\0Hybrid work (R: replay, G: visibility, B: selected)\0Hybrid quality (R: contribution, G: PDF, B: state)\0");
 		mTracing.mGiView = static_cast<uint32_t>(view);
 		ImGui::TextWrapped("Temporal modes reuse one previous raw candidate with balance MIS on flat Lambertian secondary surfaces. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
 		ImGui::TextWrapped("PT hybrid replays one glossy primary bounce, then reconnects from a rough surface to a flat Lambertian vertex. In both PT modes the Diffuse indirect views show the reconnectable contribution. Diagnostic views bypass RR.");

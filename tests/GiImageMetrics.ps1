@@ -119,6 +119,31 @@ public static class GiImageMetrics
 			return result;
 		}
 	}
+	public static int[] ShiftQuality(string path)
+	{
+		using (var bitmap = new Bitmap(path))
+		{
+			var result = new int[6 + 2 * 256];
+			for (int y = 0; y < bitmap.Height; ++y)
+			{
+				for (int x = (int)(bitmap.Width * .65); x < bitmap.Width; ++x)
+				{
+					Color p = bitmap.GetPixel(x, y);
+					if (p.B % 51 != 0)
+					{
+						throw new Exception("Invalid shift status in " + path);
+					}
+					++result[p.B / 51];
+					if (p.B == 204)
+					{
+						++result[6 + p.R];
+						++result[6 + 256 + p.G];
+					}
+				}
+			}
+			return result;
+		}
+	}
 	public static double Mse(string referencePath, string samplePath)
 	{
 		using (var reference = new Bitmap(referencePath))
