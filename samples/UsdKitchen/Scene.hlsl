@@ -857,7 +857,7 @@ void RGS_Main()
 	{
 		outputImage[pixel] = replayMismatch ? float4(1, 0, 1, 1) : float4(0, 1, longestPath > 1 ? 1 : 0, 1);
 	}
-	if (giView == 8)
+	if (giView == 8 || giView == 12)
 	{
 		outputImage[pixel] = float4(historyColor, 1);
 	}

@@ -1,12 +1,17 @@
 param(
 	[ValidateSet('Debug', 'Release')]
 	[string]$Configuration = 'Debug',
-	[switch]$CompareCost
+	[switch]$CompareCost,
+	[switch]$Quality
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testName = 'pt-hybrid'
-if ($CompareCost)
+if ($Quality)
+{
+	$testName = 'pt-hybrid-quality'
+}
+elseif ($CompareCost)
 {
 	$testName = 'pt-hybrid-cost'
 }
@@ -39,6 +44,70 @@ function Capture([string]$name, [string]$fixture, [string]$options)
 	}
 	Write-Host "$name : exit 0"
 	return $png
+}
+
+if ($Quality)
+{
+	$histogram = [Collections.Generic.List[object]]::new()
+	function MeasureShift([string]$label, [string]$png)
+	{
+		$bins = [GiImageMetrics]::ShiftQuality($png)
+		$tails = @(0, 0)
+		for ($metric = 0; $metric -lt 2; ++$metric)
+		{
+			$name = @('Contribution','AreaPdf')[$metric]
+			for ($bin = 0; $bin -lt 256; ++$bin)
+			{
+				$count = $bins[6 + 256 * $metric + $bin]
+				if ($count -eq 0)
+				{
+					continue
+				}
+				$stops = 16 * ($bin / 255.0 - .5)
+				if ([Math]::Abs($stops) -gt 1)
+				{
+					$tails[$metric] += $count
+				}
+				$histogram.Add([pscustomobject]@{Frame=$label; Metric=$name; Byte=$bin; Log2Ratio=$stops; Count=$count})
+			}
+		}
+		[pscustomobject]@{Frame=$label; Inactive=$bins[0]; SourceRejected=$bins[1]; NoCandidate=$bins[2]; ShiftRejected=$bins[3]; Measured=$bins[4]; Undefined=$bins[5]; ContributionOutside2x=$tails[0]; PdfOutside2x=$tails[1]}
+	}
+	$summary = foreach ($fixture in @('mirror','glossy','occlusion'))
+	{
+		$png = Capture "$fixture-quality" $fixture '--gi-view hybrid-quality --samples 32'
+		$row = MeasureShift $fixture $png
+		if ($row.Measured -lt 100 -or $row.Undefined -ne 0)
+		{
+			throw "Expected defined ratios for accepted $fixture shifts"
+		}
+		$row
+	}
+	$csv = Join-Path $output 'camera.csv'
+	$null = Capture 'motion' 'occlusion' ('--gi-view hybrid-quality --samples 1 --screenshot-count 32 --gi-validation "{0}"' -f $csv)
+	$rows = @(Import-Csv -LiteralPath $csv)
+	$offset = $rows.Count - 32
+	$pan = @($rows | Where-Object event -eq 'pan')
+	$cut = $rows | Where-Object event -eq 'cut' | Select-Object -First 1
+	if ($pan.Count -ne 8 -or !$cut)
+	{
+		throw 'Expected the pan and camera cut in the validation capture.'
+	}
+	foreach ($frame in @($pan) + @($cut))
+	{
+		$label = 'motion-{0:D4}' -f ([int]$frame.frame - $offset)
+		$row = MeasureShift $label (Join-Path $output "$label.png")
+		$active = $row.SourceRejected + $row.NoCandidate + $row.ShiftRejected + $row.Measured + $row.Undefined
+		if (($frame.event -eq 'cut' -and $active -ne 0) -or ($frame.event -eq 'pan' -and $row.Measured -lt 100))
+		{
+			throw "Unexpected diagnostic coverage on $label"
+		}
+		$summary += $row
+	}
+	$summary | Export-Csv -LiteralPath (Join-Path $output 'quality.csv') -NoTypeInformation
+	$histogram | Export-Csv -LiteralPath (Join-Path $output 'ratios.csv') -NoTypeInformation
+	$summary | Format-Table
+	return
 }
 
 if ($CompareCost)

@@ -140,11 +140,11 @@ int wmain(int count, wchar_t** arguments)
 		testDistribution();
 		const std::filesystem::path directory = arguments[1];
 		std::filesystem::create_directories(directory);
-		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored", L"gi-rough-metal", L"pt-hybrid-mirror", L"pt-hybrid-glossy"})
+		for (const auto& name : {L"single", L"shadow", L"multiple", L"mirror", L"dark", L"gi-colored", L"gi-rough-metal", L"pt-hybrid-mirror", L"pt-hybrid-glossy", L"pt-hybrid-occlusion"})
 		{
 			const std::wstring mode = name;
 			const bool roughMetal = mode == L"gi-rough-metal";
-			const bool hybrid = mode == L"pt-hybrid-mirror" || mode == L"pt-hybrid-glossy";
+			const bool hybrid = mode == L"pt-hybrid-mirror" || mode == L"pt-hybrid-glossy" || mode == L"pt-hybrid-occlusion";
 			const bool gi = mode == L"gi-colored" || roughMetal;
 			auto scene = fixture(mode == L"shadow" || gi, mode == L"mirror" || hybrid, mode == L"multiple" || gi || hybrid, mode == L"dark");
 			if (hybrid)
@@ -154,6 +154,10 @@ int wmain(int count, wchar_t** arguments)
 				scene.mMaterials[3].mSpecular = 0;
 				quad(scene, {-2,0,-2}, {-2,2,-2}, {2,2,-2}, {2,0,-2}, {0,0,1}, 3);
 				quad(scene, {-2,0,2}, {-2,2,2}, {-2,2,-2}, {-2,0,-2}, {1,0,0}, 3);
+				if (mode == L"pt-hybrid-occlusion")
+				{
+					quad(scene, {-0.7f,0,-0.4f}, {-0.7f,1.4f,-0.4f}, {-0.7f,1.4f,0.5f}, {-0.7f,0,0.5f}, {1,0,0}, 3);
+				}
 			}
 			if (gi)
 			{
