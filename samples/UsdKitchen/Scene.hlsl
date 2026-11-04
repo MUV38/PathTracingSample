@@ -72,7 +72,7 @@ cbuffer SceneConstants : register(b0)
 	float environmentRotation;
 	uint environmentMis;
 	uint pathReplay;
-	float padding2;
+	uint hybridUnoptimized;
 	uint rectangleCount;
 	uint sampledRectangleCount;
 	float2 rectanglePadding;
@@ -434,6 +434,7 @@ void RGS_Main()
 	float3 frameRadiance = 0.0f;
 	float3 historyColor = 0;
 	float3 spatialColor = 0;
+	uint3 hybridWork = 0;
 	uint pathSeed = 0;
 	uint recordedEndState = 0;
 	uint recordedHash = 0;
@@ -806,7 +807,7 @@ void RGS_Main()
 		}
 		else if (giEnabled >= 2)
 		{
-			diffuseGi = temporalGi(candidate, pixel, sampleIndex, sampleHistoryColor);
+			diffuseGi = temporalGi(candidate, pixel, sampleIndex, sampleHistoryColor, hybridWork);
 		}
 		// Replace the sampled diffuse indirect contribution; never add it twice.
 		if (giEnabled != 0)
@@ -863,6 +864,10 @@ void RGS_Main()
 	else if (giView == 10)
 	{
 		outputImage[pixel] = float4(spatialColor, 1);
+	}
+	else if (giView == 11)
+	{
+		outputImage[pixel] = float4(float3(hybridWork) / (float(samplesPerFrame) * float3(2, 2, 1)), 1);
 	}
 	else if (giView == 9)
 	{

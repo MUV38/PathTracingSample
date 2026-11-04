@@ -1,10 +1,16 @@
 param(
 	[ValidateSet('Debug', 'Release')]
-	[string]$Configuration = 'Debug'
+	[string]$Configuration = 'Debug',
+	[switch]$CompareCost
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$output = Join-Path $repository "build/checks/pt-hybrid-$Configuration"
+$testName = 'pt-hybrid'
+if ($CompareCost)
+{
+	$testName = 'pt-hybrid-cost'
+}
+$output = Join-Path $repository "build/checks/$testName-$Configuration"
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $bin = Join-Path $repository "build/x64/$Configuration"
 $fixtures = Join-Path $output 'fixtures'
@@ -33,6 +39,82 @@ function Capture([string]$name, [string]$fixture, [string]$options)
 	}
 	Write-Host "$name : exit 0"
 	return $png
+}
+
+if ($CompareCost)
+{
+	$work = foreach ($fixture in @('mirror','glossy','black-suffix'))
+	{
+		$model = $fixture
+		$options = '--restir-pt hybrid'
+		if ($fixture -eq 'black-suffix')
+		{
+			$model = 'mirror'
+			$options += ' --bounces 2 --no-emissive-mis'
+		}
+		$before = Capture "$fixture-unoptimized" $model "$options --hybrid-unoptimized --samples 64 --spp 4"
+		$after = Capture "$fixture-optimized" $model "$options --samples 64 --spp 4"
+		if ([GiImageMetrics]::MaxDifference($before, $after) -ne 0)
+		{
+			throw "RGB differs with the optimization: $fixture"
+		}
+		$before = Capture "$fixture-work-before" $model "$options --hybrid-unoptimized --gi-view hybrid-cost --samples 16"
+		$after = Capture "$fixture-work-after" $model "$options --gi-view hybrid-cost --samples 16"
+		$a = [GiImageMetrics]::HybridWork($before)
+		$b = [GiImageMetrics]::HybridWork($after)
+		if ($a[0] -eq 0 -or $b[0] -gt $a[0] -or $b[1] -gt $a[1] -or $a[2] -ne $b[2])
+		{
+			throw "Unexpected work or selected history count: $fixture"
+		}
+		if ($fixture -eq 'black-suffix' -and ($b[0] -ne 0 -or $a[1] -eq 0 -or $b[1] -ne 0))
+		{
+			throw 'Expected to skip all replay and visibility work for black suffixes.'
+		}
+		[pscustomobject]@{Fixture=$fixture; ReplayBefore=$a[0]; ReplayAfter=$b[0]; VisibilityBefore=$a[1]; VisibilityAfter=$b[1]; Selected=$b[2]}
+	}
+	$work | Export-Csv -LiteralPath (Join-Path $output 'work.csv') -NoTypeInformation
+	$work | Format-Table
+	$null = Capture 'motion-before' 'mirror' ('--restir-pt hybrid --hybrid-unoptimized --samples 1 --screenshot-count 32 --gi-validation "{0}/motion-before.csv"' -f $output)
+	$null = Capture 'motion-after' 'mirror' ('--restir-pt hybrid --samples 1 --screenshot-count 32 --gi-validation "{0}/motion-after.csv"' -f $output)
+	for ($frame = 0; $frame -lt 32; ++$frame)
+	{
+		$before = Join-Path $output ('motion-before-{0:D4}.png' -f $frame)
+		$after = Join-Path $output ('motion-after-{0:D4}.png' -f $frame)
+		if ([GiImageMetrics]::MaxDifference($before, $after) -ne 0)
+		{
+			throw "RGB differs during camera motion at frame $frame"
+		}
+	}
+	Write-Host 'All 32 camera-motion frames match in the RGB ROI.'
+
+	$comparison = foreach ($fixture in @('mirror','glossy'))
+	{
+		$reference = Capture "$fixture-reference" $fixture '--samples 2048 --spp 16'
+		foreach ($mode in @('off','unoptimized','optimized'))
+		{
+			$csv = Join-Path $output "$fixture-budget-$mode.csv"
+			$options = '--restir-pt hybrid'
+			if ($mode -eq 'off')
+			{
+				$options = '--restir-pt off'
+			}
+			elseif ($mode -eq 'unoptimized')
+			{
+				$options += ' --hybrid-unoptimized'
+			}
+			$png = Capture "$fixture-budget-$mode" $fixture ('{0} --samples 1 --gpu-budget-ms 1000 --gpu-timing "{1}"' -f $options,$csv)
+			$rows = @(Import-Csv -LiteralPath $csv)
+			$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
+			if ($rows.Count -lt 8 -or $stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
+			{
+				throw "Unexpected GPU budget for $fixture / $mode"
+			}
+			[pscustomobject]@{Fixture=$fixture; Mode=$mode; GpuMilliseconds=$stats.Sum; Samples=[int]$rows[-1].samples; LuminanceMse=[GiImageMetrics]::Mse($reference,$png)}
+		}
+	}
+	$comparison | Export-Csv -LiteralPath (Join-Path $output 'budget.csv') -NoTypeInformation
+	$comparison | Format-Table Fixture, Mode, GpuMilliseconds, Samples, @{Name='LuminanceMse'; Expression={ '{0:E4}' -f $_.LuminanceMse }}
+	return
 }
 
 $energy = foreach ($fixture in @('mirror','glossy'))
