@@ -359,6 +359,18 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mPathReplay = flag == L"--path-replay-check" ? 2u : 1u;
 			continue;
 		}
+		if (flag == L"--pt-reservoir-confidence" && index + 1 < arguments.size())
+		{
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const auto number = std::stoul(value, &consumed);
+			if (consumed != value.size() || number < 2 || number > 8)
+			{
+				throw std::runtime_error("--pt-reservoir-confidence expects 2..8.");
+			}
+			mTracing.mPtReservoirConfidence = static_cast<uint32_t>(number);
+			continue;
+		}
 		if (flag == L"--hybrid-unoptimized")
 		{
 			mTracing.mHybridUnoptimized = true;

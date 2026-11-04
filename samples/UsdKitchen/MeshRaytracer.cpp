@@ -96,7 +96,8 @@ struct SceneConstants
 	float mLightStrength = 4.0f;
 	float mAmbient = 0.15f;
 	float mShadowBias = 0.0002f;
-	std::array<float, 2> mPadding{};
+	uint32_t mPtReservoirConfidence = 8;
+	float mPadding = 0;
 	uint32_t mFrameIndex = 0;
 	uint32_t mMaxBounces = 3;
 	uint32_t mSamplesPerFrame = 1;
@@ -698,6 +699,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mGiEnabled = meshletColors || replay ? 0u
 		: tracing.mGiView == 13 ? 6u : tracing.mGiView >= 11 ? 5u : tracing.mGiView == 10 ? 3u : (std::max)(tracing.mGiMode, minimumGiMode);
 	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
+	constants.mPtReservoirConfidence = std::clamp(tracing.mPtReservoirConfidence, 2u, 8u);
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
