@@ -221,6 +221,8 @@ NEEにもAOを適用し、反射回数上限ではNEEを追加しません。IBL
 `--restir-gi temporal` は平坦なLambert二次面の候補を前フレームから1つ再利用します。対象外の鏡面などは通常PTで評価します。
 `--restir-gi spatial` は時間再利用に加え、同じフレームの近隣4画素から候補を再利用します。生候補を準備するため、描画の前に1画素あたり1経路のプリパスを追加します。
 `--no-gi-spatial` と `--no-gi-history` で各再利用を個別に無効化でき、`--gi-view history|spatial|diffuse-noisy` で候補の受理・選択や非蓄積GIを確認できます。
+
+ReSTIR PTの準備として、`--path-replay` は通常PTの各サンプルを開始時の乱数シードから再現し、照合に失敗した画素をマゼンタで表示します。`--path-replay-check` では、一致を緑、2本以上のレイを追跡した一致をシアンで表示します。両モードではReSTIR DI/GIとRay Reconstructionを無効にします。検証手順は [PathReplay.md](../../tests/PathReplay.md) を参照してください。
 再帰的な履歴蓄積と空間再利用は未実装です。詳しい分離方法、対象範囲、メモリ量、検証は [ReSTIR GIの手順](../../tests/RestirGI.md) を参照してください。
 小さく明るい光を含むHDR、光沢面のコースティクス、閉じた空間では多くのサンプルが必要です。反射上限で打ち切った経路の先は黒くなります。
 

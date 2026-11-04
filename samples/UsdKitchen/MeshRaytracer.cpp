@@ -103,7 +103,8 @@ struct SceneConstants
 	float mEnvironmentIntensity = 1.0f;
 	float mEnvironmentRotation = 0.0f;
 	uint32_t mEnvironmentMis = 1;
-	std::array<float, 2> mPadding2{};
+	uint32_t mPathReplay = 0;
+	float mPadding2 = 0;
 	uint32_t mRectangleCount = 0;
 	uint32_t mSampledRectangleCount = 0;
 	std::array<float,2> mRectanglePadding{};
@@ -689,13 +690,15 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mEmissiveMis = tracing.mEmissiveMis && !meshletColors ? 1u : 0u;
 	constants.mMultipleScattering = tracing.mMultipleScattering ? 1u : 0u;
 	constants.mRussianRoulette = tracing.mRussianRoulette ? 1u : 0u;
-	constants.mRestirMode = meshletColors ? 0u : tracing.mRestirMode;
-	constants.mRestirDebug = tracing.mRestirDebug;
+	constants.mPathReplay = tracing.mPathReplay;
+	const bool replay = constants.mPathReplay != 0;
+	constants.mRestirMode = meshletColors || replay ? 0u : tracing.mRestirMode;
+	constants.mRestirDebug = replay ? 0u : tracing.mRestirDebug;
 	const uint32_t guideGiMode = tracing.mGiView == 10 ? 3u : tracing.mGiView == 8 ? 2u : tracing.mGiView > 0 ? 1u : 0u;
-	constants.mGiEnabled = meshletColors ? 0u : (std::max)(tracing.mGiMode, guideGiMode);
-	constants.mGiView = meshletColors ? 0u : tracing.mGiView;
+	constants.mGiEnabled = meshletColors || replay ? 0u : (std::max)(tracing.mGiMode, guideGiMode);
+	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
-	const bool useRR = mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
+	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
 	const bool spatialGi = constants.mGiEnabled == 3 && tracing.mGiSpatial && tracing.mMaxBounces > 0
 		&& constants.mRestirDebug == 0 && (constants.mGiView < 3 || constants.mGiView >= 8) && (!useRR || mRRView <= 1);
 	constants.mGiUseSpatial = spatialGi ? 1u : 0u;
@@ -944,7 +947,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	commands->SetComputeRoot32BitConstant(12, 2, 0);
 	{
-		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), useRR && mRRView >= 2 ? "RR diagnostic guides" : "Path tracing");
+		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), replay ? "Path tracing / deterministic replay" : useRR && mRRView >= 2 ? "RR diagnostic guides" : "Path tracing");
 		commands->DispatchRays(&dispatch);
 	}
 	if (useRR)

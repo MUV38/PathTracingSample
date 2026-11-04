@@ -344,6 +344,11 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mGiMode = value == L"spatial" ? 3u : value == L"temporal" ? 2u : (value == L"candidates" ? 1u : 0u);
 			continue;
 		}
+		if (flag == L"--path-replay" || flag == L"--path-replay-check")
+		{
+			mTracing.mPathReplay = flag == L"--path-replay-check" ? 2u : 1u;
+			continue;
+		}
 		if (flag == L"--no-gi-spatial")
 		{
 			mTracing.mGiSpatial = false;

@@ -71,7 +71,8 @@ cbuffer SceneConstants : register(b0)
 	float environmentIntensity;
 	float environmentRotation;
 	uint environmentMis;
-	float2 padding2;
+	uint pathReplay;
+	float padding2;
 	uint rectangleCount;
 	uint sampledRectangleCount;
 	float2 rectanglePadding;
@@ -229,14 +230,13 @@ bool visibleToEnvironment(Surface surface, float3 direction)
 	}
 	return true;
 }
-float3 environmentLighting(Surface surface, float3 view, float2 u)
+float3 environmentLighting(Surface surface, float3 view, float2 u, out float proposalPdf)
 {
 	uint width, height;
 	environmentMap.GetDimensions(width, height);
-	float pdf;
-	float3 direction = sampleEnvironmentDirection(environmentDistribution, uint2(width, height), u, environmentRotation, pdf);
+	float3 direction = sampleEnvironmentDirection(environmentDistribution, uint2(width, height), u, environmentRotation, proposalPdf);
 	float cosine = dot(surface.normal, direction);
-	if (pdf <= 0.0f || cosine <= 0.0f || dot(surface.geometricNormal, direction) <= 0.0f)
+	if (proposalPdf <= 0.0f || cosine <= 0.0f || dot(surface.geometricNormal, direction) <= 0.0f)
 	{
 		return 0.0f;
 	}
@@ -250,7 +250,7 @@ float3 environmentLighting(Surface surface, float3 view, float2 u)
 	{
 		return 0.0f;
 	}
-	return bsdf * cosine * surface.occlusion * sampleEnvironment(direction) * powerHeuristic(pdf, bsdfPdf) / pdf;
+	return bsdf * cosine * surface.occlusion * sampleEnvironment(direction) * powerHeuristic(proposalPdf, bsdfPdf) / proposalPdf;
 }
 bool visibleToPoint(Surface surface, float3 lightPoint)
 {
@@ -274,13 +274,13 @@ bool visibleToPoint(Surface surface, float3 lightPoint)
 	}
 	return true;
 }
-float3 rectangleLighting(Surface surface, float3 view, RectangleLight rectangle, float2 u)
+float3 rectangleLighting(Surface surface, float3 view, RectangleLight rectangle, float2 u, out float proposalPdf)
 {
 	float3 lightPoint = sampleRectanglePoint(rectangle, u);
 	float3 delta = lightPoint - surface.position;
 	float distanceSquared = dot(delta, delta);
-	float pdf = rectangle.selectionPdf * rectanglePdf(rectangle, surface.position, lightPoint);
-	if (pdf <= 0.0f)
+	proposalPdf = rectangle.selectionPdf * rectanglePdf(rectangle, surface.position, lightPoint);
+	if (proposalPdf <= 0.0f)
 	{
 		return 0.0f;
 	}
@@ -300,10 +300,11 @@ float3 rectangleLighting(Surface surface, float3 view, RectangleLight rectangle,
 	{
 		return 0.0f;
 	}
-	return bsdf * cosine * surface.occlusion * rectangle.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
+	return bsdf * cosine * surface.occlusion * rectangle.radiance * powerHeuristic(proposalPdf, bsdfPdf) / proposalPdf;
 }
-float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle)
+float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle, out float proposalPdf)
 {
+	proposalPdf = 0;
 	uint index = sampleMeshLightIndex(meshLights, meshLightCount, u.z);
 	if (index == hitTriangle)
 	{
@@ -311,8 +312,8 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 	}
 	MeshLight light = meshLights[index];
 	float3 lightPoint = sampleMeshLightPoint(light, u.xy);
-	float pdf = meshLightPdf(light, surface.position, lightPoint);
-	if (pdf <= 0.0f)
+	proposalPdf = meshLightPdf(light, surface.position, lightPoint);
+	if (proposalPdf <= 0.0f)
 	{
 		return 0.0f;
 	}
@@ -328,12 +329,24 @@ float3 emissiveLighting(Surface surface, float3 view, float3 u, uint hitTriangle
 	{
 		return 0.0f;
 	}
-	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(pdf, bsdfPdf) / pdf;
+	return bsdf * cosine * surface.occlusion * light.radiance * powerHeuristic(proposalPdf, bsdfPdf) / proposalPdf;
 }
 #include "RestirPasses.hlsli"
 #include "GiTemporal.hlsli"
 #include "GiSpatial.hlsli"
 #include "RayReconstruction.hlsli"
+void recordPathValue(inout uint digest, uint value)
+{
+	digest = (digest ^ value) * 16777619u;
+}
+
+void recordPathVector(inout uint digest, float3 value)
+{
+	recordPathValue(digest, asuint(value.x));
+	recordPathValue(digest, asuint(value.y));
+	recordPathValue(digest, asuint(value.z));
+}
+
 [shader("raygeneration")]
 void RGS_Main()
 {
@@ -407,8 +420,27 @@ void RGS_Main()
 	float3 frameRadiance = 0.0f;
 	float3 historyColor = 0;
 	float3 spatialColor = 0;
-	for (uint sampleIndex = 0; sampleIndex < (giCandidatePrepass ? 1u : samplesPerFrame); ++sampleIndex)
+	uint pathSeed = 0;
+	uint recordedEndState = 0;
+	uint recordedHash = 0;
+	float3 recordedRadiance = 0;
+	bool replayMismatch = false;
+	uint longestPath = 0;
+	uint passesPerSample = pathReplay != 0 ? 2u : 1u;
+	uint pathCount = giCandidatePrepass ? 1u : samplesPerFrame * passesPerSample;
+	for (uint pathIndex = 0; pathIndex < pathCount; ++pathIndex)
 	{
+		uint sampleIndex = pathIndex / passesPerSample;
+		bool replaying = pathReplay != 0 && (pathIndex & 1u) != 0;
+		if (replaying)
+		{
+			state = pathSeed;
+		}
+		else
+		{
+			pathSeed = state;
+		}
+		uint pathHash = 2166136261u;
 		float2 dimensions = float2(DispatchRaysDimensions().xy);
 		float2 jitter = fixedGiGuide || giView == 8 || giView == 10 ? 0.5f : (rrEnabled != 0 ? 0.5f + rrJitter : float2(random(state), random(state)));
 		float2 uv = float2((float(pixel.x) - viewportLeft + jitter.x) / max(dimensions.x - viewportLeft, 1.0f),
@@ -436,6 +468,11 @@ void RGS_Main()
 			Payload payload;
 			payload.hit = 0;
 			TraceRay(scene, RAY_FLAG_NONE, 0xff, 0, 0, 0, ray, payload);
+			if (pathReplay != 0)
+			{
+				longestPath = max(longestPath, depth + 1u);
+				recordPathVector(pathHash, ray.Direction);
+			}
 			float rectangleDistance;
 			uint rectangleIndex = nearestRectangle(ray, rectangleDistance);
 			if (!giCandidatePrepass && rrEnabled != 0 && sampleIndex == 0 && depth == 0)
@@ -450,6 +487,12 @@ void RGS_Main()
 				&& (payload.hit == 0 || rectangleDistance < dot(payload.position - ray.Origin, ray.Direction)))
 			{
 				RectangleLight rectangle = rectangles[rectangleIndex];
+				if (pathReplay != 0)
+				{
+					recordPathValue(pathHash, 1u);
+					recordPathValue(pathHash, rectangleIndex);
+					recordPathValue(pathHash, asuint(rectangleDistance));
+				}
 				float weight = 1.0f;
 				if (depth > 0 && !previousDelta && rectangle.mis != 0)
 				{
@@ -460,6 +503,10 @@ void RGS_Main()
 					else
 					{
 						float pdf = rectangle.selectionPdf * rectanglePdf(rectangle, previousPosition, ray.Origin + ray.Direction * rectangleDistance);
+						if (pathReplay != 0)
+						{
+							recordPathValue(pathHash, asuint(pdf));
+						}
 						weight = powerHeuristic(previousBsdfPdf, pdf);
 					}
 				}
@@ -469,11 +516,21 @@ void RGS_Main()
 			}
 			if (payload.hit == 0)
 			{
+				if (pathReplay != 0)
+				{
+					recordPathValue(pathHash, 0u);
+				}
 				addGiPathRadiance(payload.color * missWeight, throughput,
 					candidate.valid != 0 && depth > 1, suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				break;
 			}
 			Material material = materials[payload.materialIndex];
+			if (pathReplay != 0)
+			{
+				recordPathValue(pathHash, 2u);
+				recordPathValue(pathHash, payload.triangleIndex);
+				recordPathVector(pathHash, payload.position);
+			}
 			Surface surface;
 			surface.singleScatterOnly = multipleScattering == 0;
 			surface.position = payload.position;
@@ -530,6 +587,10 @@ void RGS_Main()
 				else
 				{
 					float pdf = meshLightPdf(meshLights[payload.triangleIndex], previousPosition, payload.position);
+					if (pathReplay != 0)
+					{
+						recordPathValue(pathHash, asuint(pdf));
+					}
 					emissionWeight = powerHeuristic(previousBsdfPdf, pdf);
 				}
 			}
@@ -558,7 +619,13 @@ void RGS_Main()
 			if (!useRestir && environmentMis != 0 && environmentIntensity > 0.0f)
 			{
 				float2 lightU = float2(random(state), random(state));
-				addGiPathRadiance(environmentLighting(surface, view, lightU), throughput, candidate.valid != 0,
+				float proposalPdf;
+				float3 light = environmentLighting(surface, view, lightU, proposalPdf);
+				if (pathReplay != 0)
+				{
+					recordPathValue(pathHash, asuint(proposalPdf));
+				}
+				addGiPathRadiance(light, throughput, candidate.valid != 0,
 					suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			}
 			if (!useRestir && sampledRectangleCount > 0)
@@ -567,14 +634,26 @@ void RGS_Main()
 				float2 lightU = float2(random(state), random(state));
 				if (lightIndex < rectangleCount)
 				{
-					addGiPathRadiance(rectangleLighting(surface, view, rectangles[lightIndex], lightU), throughput, candidate.valid != 0,
+					float proposalPdf;
+					float3 light = rectangleLighting(surface, view, rectangles[lightIndex], lightU, proposalPdf);
+					if (pathReplay != 0)
+					{
+						recordPathValue(pathHash, asuint(proposalPdf));
+					}
+					addGiPathRadiance(light, throughput, candidate.valid != 0,
 						suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 				}
 			}
 			if (!useRestir && emissiveMis != 0 && meshLightCount > 0)
 			{
 				float3 lightU = float3(random(state), random(state), random(state));
-				addGiPathRadiance(emissiveLighting(surface, view, lightU, payload.triangleIndex), throughput, candidate.valid != 0,
+				float proposalPdf;
+				float3 light = emissiveLighting(surface, view, lightU, payload.triangleIndex, proposalPdf);
+				if (pathReplay != 0)
+				{
+					recordPathValue(pathHash, asuint(proposalPdf));
+				}
+				addGiPathRadiance(light, throughput, candidate.valid != 0,
 					suffixThroughput, diffuseRatio, radiance, suffixRadiance, referenceDiffuse);
 			}
 			float3 nextDirection, weight;
@@ -589,6 +668,16 @@ void RGS_Main()
 				suffixThroughput *= weight;
 			}
 			float survival = pathSurvivalProbability(throughput, depth + 1u, russianRoulette != 0);
+			if (pathReplay != 0)
+			{
+				recordPathValue(pathHash, asuint(survival));
+				float proposalPdf;
+				float lobeProbability = specularProbability(surface, view);
+				bool deltaSample = surface.roughness < 0.001f && u.z < lobeProbability;
+				evaluateBsdf(surface, view, nextDirection, proposalPdf);
+				recordPathValue(pathHash, deltaSample ? 1u : 0u);
+				recordPathValue(pathHash, asuint(deltaSample ? lobeProbability : proposalPdf));
+			}
 			if (survival < 1.0f)
 			{
 				if (!surviveRoulette(throughput, survival, random(state)))
@@ -625,6 +714,10 @@ void RGS_Main()
 				uint width, height;
 				environmentMap.GetDimensions(width, height);
 				float lightPdf = environmentPdf(environmentDistribution, uint2(width, height), nextDirection, environmentRotation);
+				if (pathReplay != 0)
+				{
+					recordPathValue(pathHash, asuint(lightPdf));
+				}
 				if (useRestir)
 				{
 					lightPdf *= restirEnvironmentSampleRatio();
@@ -643,6 +736,19 @@ void RGS_Main()
 			ray.Direction = nextDirection;
 			ray.Origin = offsetOrigin(payload.position, payload.geometricNormal);
 			ray.TMin = 0.0f;
+		}
+		if (pathReplay != 0)
+		{
+			if (replaying)
+			{
+				replayMismatch = replayMismatch || pathHash != recordedHash || state != recordedEndState
+					|| any(asuint(radiance) != asuint(recordedRadiance)) || !all(isfinite(radiance));
+				state = recordedEndState;
+				continue;
+			}
+			recordedHash = pathHash;
+			recordedEndState = state;
+			recordedRadiance = radiance;
 		}
 		candidate.radiance = suffixRadiance;
 		candidate.targetDensity = dot(max(candidate.diffuseBrdfCosine * suffixRadiance, 0), float3(0.2126f, 0.7152f, 0.0722f));
@@ -714,6 +820,10 @@ void RGS_Main()
 		rrColor[uint2(pixel.x - uint(viewportLeft), pixel.y)] = float4(frameRadiance, 1);
 	}
 	outputImage[pixel] = float4(displayColor(average), 1.0f);
+	if (pathReplay == 2 || replayMismatch)
+	{
+		outputImage[pixel] = replayMismatch ? float4(1, 0, 1, 1) : float4(0, 1, longestPath > 1 ? 1 : 0, 1);
+	}
 	if (giView == 8)
 	{
 		outputImage[pixel] = float4(historyColor, 1);

@@ -25,6 +25,7 @@ $cases = @(
 	@{Name="clas-reference"; Project="ClasSandbox"; Options="--model assets/PreviewRoom.ptscene --no-preview"; Markers=@("CLAS Sandbox", "Trace reference meshlets", "Copy to back buffer")},
 	@{Name="gi-temporal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --specular 0 --restir-gi temporal --samples 128"; Markers=@("Path tracing", "GI=2", "Copy to back buffer")},
 	@{Name="gi-spatial"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --specular 0 --restir-gi spatial --samples 128"; Markers=@("GI / current raw candidate prepass", "Path tracing", "GI=3", "Copy to back buffer")},
+	@{Name="path-replay"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --path-replay-check --spp 4 --samples 32"; Markers=@("Path tracing / deterministic replay", "Copy to back buffer")},
 	@{Name="nee"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --no-rr --samples 128"; Markers=@("UsdKitchen", "Path tracing", "Copy to back buffer")},
 	@{Name="restir-rr"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr --restir spatial --samples 128"; Markers=@("ReSTIR DI / candidates + temporal", "ReSTIR DI / spatial reuse", "Path tracing", "DLSS Ray Reconstruction", "Tone mapping / RR view")},
 	@{Name="normal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --rr-view normal --samples 128"; Markers=@("RR diagnostic guides", "Tone mapping / RR view")}
