@@ -164,6 +164,110 @@ public static class GiImageMetrics
 			return result;
 		}
 	}
+	static double Luminance(Color pixel)
+	{
+		return .2126 * Linear(pixel.R) + .7152 * Linear(pixel.G) + .0722 * Linear(pixel.B);
+	}
+	public static double[] SeedError(string referencePath, string[] samplePaths)
+	{
+		using (var reference = new Bitmap(referencePath))
+		{
+			var samples = new Bitmap[samplePaths.Length];
+			try
+			{
+				for (int i = 0; i < samples.Length; ++i)
+				{
+					samples[i] = new Bitmap(samplePaths[i]);
+					if (samples[i].Size != reference.Size)
+					{
+						throw new ArgumentException("Seed image size differs from reference");
+					}
+				}
+				var totals = new double[4];
+				int count = 0;
+				for (int y = 0; y < reference.Height; y += 4)
+				{
+					for (int x = (int)(reference.Width * .65); x < reference.Width; x += 4)
+					{
+						double target = Luminance(reference.GetPixel(x, y));
+						if (target < .0003)
+						{
+							continue;
+						}
+						double sum = 0, squares = 0;
+						foreach (var sample in samples)
+						{
+							double error = Luminance(sample.GetPixel(x, y)) - target;
+							sum += error;
+							squares += error * error;
+						}
+						double mean = sum / samples.Length;
+						double variance = Math.Max(0, squares - sum * mean) / (samples.Length - 1);
+						totals[0] += mean;
+						totals[1] += variance;
+						totals[2] += mean * mean - variance / samples.Length;
+						totals[3] += squares / samples.Length;
+						count++;
+					}
+				}
+				if (count < 100)
+				{
+					throw new Exception("Empty diffuse-GI reference");
+				}
+				for (int i = 0; i < totals.Length; ++i)
+				{
+					totals[i] /= count;
+				}
+				return totals;
+			}
+			finally
+			{
+				foreach (var sample in samples)
+				{
+					if (sample != null)
+					{
+						sample.Dispose();
+					}
+				}
+			}
+		}
+	}
+	public static int HistoryErrorMap(string referencePath, string samplePath, string guidePath, string outputPath)
+	{
+		using (var reference = new Bitmap(referencePath))
+		using (var sample = new Bitmap(samplePath))
+		using (var guide = new Bitmap(guidePath))
+		using (var map = new Bitmap(reference.Width, reference.Height))
+		{
+			if (sample.Size != reference.Size || guide.Size != reference.Size)
+			{
+				throw new ArgumentException("History image size differs from reference");
+			}
+			int oldest = 0;
+			for (int y = 0; y < map.Height; ++y)
+			{
+				for (int x = (int)(map.Width * .65); x < map.Width; ++x)
+				{
+					double target = Luminance(reference.GetPixel(x, y));
+					if (target < .0003)
+					{
+						continue;
+					}
+					double error = Math.Abs(Luminance(sample.GetPixel(x, y)) - target);
+					Color path = guide.GetPixel(x, y);
+					int age = (int)Math.Round(path.G * (32.0 / 255));
+					if ((path.B == 255) != (age > 0))
+					{
+						throw new Exception("History selection and age disagree");
+					}
+					oldest = Math.Max(oldest, age);
+					map.SetPixel(x, y, Color.FromArgb((int)Math.Round(255 * Math.Min(error / .025, 1)), path.G, path.B));
+				}
+			}
+			map.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
+			return oldest;
+		}
+	}
 	public static double Mse(string referencePath, string samplePath)
 	{
 		using (var reference = new Bitmap(referencePath))
@@ -176,8 +280,8 @@ public static class GiImageMetrics
 				for (int x = (int)(reference.Width * .65); x < reference.Width; x += 4)
 				{
 					Color r = reference.GetPixel(x,y), s = sample.GetPixel(x,y);
-					double a = .2126 * Linear(r.R) + .7152 * Linear(r.G) + .0722 * Linear(r.B);
-					double b = .2126 * Linear(s.R) + .7152 * Linear(s.G) + .0722 * Linear(s.B);
+					double a = Luminance(r);
+					double b = Luminance(s);
 					if (a < .0003)
 					{
 						continue;

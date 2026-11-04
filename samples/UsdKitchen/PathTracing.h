@@ -21,4 +21,5 @@ struct PathTracing
 	uint32_t mPathReplay = 0;
 	bool mHybridUnoptimized = false;
 	uint32_t mPtReservoirConfidence = 8;
+	uint32_t mSeed = 0;
 };

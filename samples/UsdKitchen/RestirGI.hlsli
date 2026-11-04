@@ -23,7 +23,8 @@ struct GiCandidate
 	float3 sourceView;
 	uint prefixTriangle;
 	float confidence;
-}; // 164 bytes; renderer allocation must match.
+	uint historyAge;
+}; // 168 bytes; renderer allocation must match.
 
 float3 giDiffuseBrdfCosine(Surface surface, float3 view, float3 direction)
 {

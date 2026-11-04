@@ -65,7 +65,7 @@ cbuffer SceneConstants : register(b0)
 	float ambient;
 	float shadowBias;
 	uint ptReservoirConfidence;
-	float padding;
+	uint sampleSeed;
 	uint frameIndex;
 	uint maxBounces;
 	uint samplesPerFrame;
@@ -367,7 +367,7 @@ void recordPathVector(inout uint digest, float3 value)
 void RGS_Main()
 {
 	uint2 pixel = DispatchRaysIndex().xy;
-	uint state = pixel.x + pixel.y * DispatchRaysDimensions().x;
+	uint state = (pixel.x + pixel.y * DispatchRaysDimensions().x) ^ (sampleSeed * 0x9e3779b9u);
 	bool fixedGiGuide = giView >= 4 && giView <= 6;
 	state ^= ((fixedGiGuide ? 0u : (giEnabled >= 2 ? restirFrame : (rrEnabled != 0 ? rrFrame : frameIndex))) + 1u) * 277803737u;
 	if (restirPass == 3)
@@ -812,7 +812,7 @@ void RGS_Main()
 			diffuseGi = temporalPtReservoir(candidate, pixel, sampleIndex, stored, sampleHistoryColor);
 			if (giView == 13)
 			{
-				sampleHistoryColor = float3(stored.confidence / 8, 0, sampleHistoryColor.b);
+				sampleHistoryColor = float3(stored.confidence / 8, stored.historyAge / 32.0f, sampleHistoryColor.b);
 			}
 		}
 		else if (giEnabled >= 2)
