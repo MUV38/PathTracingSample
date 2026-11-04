@@ -18,4 +18,5 @@ struct PathTracing
 	bool mGiHistory = true;
 	bool mGiSpatial = true;
 	uint32_t mGiView = 0;
+	uint32_t mPathReplay = 0;
 };

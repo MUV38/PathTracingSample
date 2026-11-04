@@ -60,6 +60,46 @@ public static class GiImageMetrics
 			return result;
 		}
 	}
+	public static int CheckReplay(string path)
+	{
+		using (var bitmap = new Bitmap(path))
+		{
+			int continued = 0;
+			for (int y = 0; y < bitmap.Height; ++y)
+			{
+				for (int x = (int)(bitmap.Width * .65); x < bitmap.Width; ++x)
+				{
+					Color p = bitmap.GetPixel(x, y);
+					if (p.R != 0 || p.G != 255 || (p.B != 0 && p.B != 255))
+					{
+						throw new Exception("Invalid replay result at " + x + ", " + y);
+					}
+					if (p.B == 255)
+					{
+						++continued;
+					}
+				}
+			}
+			return continued;
+		}
+	}
+	public static int MaxDifference(string referencePath, string samplePath)
+	{
+		using (var reference = new Bitmap(referencePath))
+		using (var sample = new Bitmap(samplePath))
+		{
+			int error = 0;
+			for (int y = 0; y < reference.Height; ++y)
+			{
+				for (int x = (int)(reference.Width * .65); x < reference.Width; ++x)
+				{
+					Color a = reference.GetPixel(x, y), b = sample.GetPixel(x, y);
+					error = Math.Max(error, Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B))));
+				}
+			}
+			return error;
+		}
+	}
 	public static double Mse(string referencePath, string samplePath)
 	{
 		using (var reference = new Bitmap(referencePath))
