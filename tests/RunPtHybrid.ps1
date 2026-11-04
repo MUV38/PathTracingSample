@@ -4,12 +4,21 @@ param(
 	[switch]$CompareCost,
 	[switch]$Quality,
 	[switch]$Reservoir,
-	[switch]$EvaluateReservoir
+	[switch]$EvaluateReservoir,
+	[switch]$RepeatBudget
 )
 $ErrorActionPreference = 'Stop'
+if ($RepeatBudget -and !$EvaluateReservoir)
+{
+	throw '-RepeatBudget requires -EvaluateReservoir.'
+}
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testName = 'pt-hybrid'
-if ($EvaluateReservoir)
+if ($RepeatBudget)
+{
+	$testName = 'pt-reservoir-budget-repeats'
+}
+elseif ($EvaluateReservoir)
 {
 	$testName = 'pt-reservoir-eval'
 }
@@ -86,39 +95,84 @@ if ($EvaluateReservoir)
 		))
 		{
 			$fixedCount = 0
-			foreach ($mode in $modes)
+			$rounds = 1
+			if ($RepeatBudget -and !$test.Fixed)
 			{
-				$name = "$fixture-$($test.Name)-$($mode.Name)"
-				$csv = Join-Path $output "$name.csv"
-				$png = Capture $name $fixture ('{0} {1} --spp 1 --gpu-timing "{2}"' -f $mode.Options,$test.Options,$csv)
-				$rows = @(Import-Csv -LiteralPath $csv)
-				$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
-				if ($rows.Count -lt 8)
+				$rounds = $modes.Count
+			}
+			for ($round = 0; $round -lt $rounds; ++$round)
+			{
+				for ($position = 0; $position -lt $modes.Count; ++$position)
 				{
-					throw "Missing GPU timing rows: $name"
-				}
-				$count = [int]$rows[-1].samples
-				if ($test.Fixed)
-				{
-					if ($fixedCount -eq 0)
+					# Over five rounds each mode runs once in each position.
+					$mode = $modes[($position + 2 * $round) % $modes.Count]
+					$name = "$fixture-$($test.Name)-$($mode.Name)"
+					if ($rounds -gt 1)
 					{
-						$fixedCount = $count
+						$name += "-round$($round + 1)"
 					}
-					if ($count -lt 128 -or $count -ne $fixedCount)
+					$csv = Join-Path $output "$name.csv"
+					$png = Capture $name $fixture ('{0} {1} --spp 1 --gpu-timing "{2}"' -f $mode.Options,$test.Options,$csv)
+					$rows = @(Import-Csv -LiteralPath $csv)
+					$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
+					if ($rows.Count -lt 8)
 					{
-						throw "Sample count differs: $name"
+						throw "Missing GPU timing rows: $name"
+					}
+					$count = [int]$rows[-1].samples
+					if ($test.Fixed)
+					{
+						if ($fixedCount -eq 0)
+						{
+							$fixedCount = $count
+						}
+						if ($count -lt 128 -or $count -ne $fixedCount)
+						{
+							throw "Sample count differs: $name"
+						}
+					}
+					elseif ($stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
+					{
+						throw "Unexpected GPU budget: $name"
+					}
+					[pscustomobject]@{
+						Fixture=$fixture; Test=$test.Name; Mode=$mode.Name; Round=$round + 1; Position=$position + 1
+						GpuMilliseconds=$stats.Sum; Samples=$count; LuminanceMse=[GiImageMetrics]::Mse($references[$test.Component],$png)
 					}
 				}
-				elseif ($stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
-				{
-					throw "Unexpected GPU budget: $name"
-				}
-				[pscustomobject]@{Fixture=$fixture; Test=$test.Name; Mode=$mode.Name; GpuMilliseconds=$stats.Sum; Samples=$count; LuminanceMse=[GiImageMetrics]::Mse($references[$test.Component],$png)}
 			}
 		}
 	}
 	$results | Export-Csv -LiteralPath (Join-Path $output 'evaluation.csv') -NoTypeInformation
-	$results | Format-Table Fixture, Test, Mode, GpuMilliseconds, Samples, @{Name='LuminanceMse'; Expression={ '{0:E4}' -f $_.LuminanceMse }}
+	if ($RepeatBudget)
+	{
+		$summary = foreach ($group in ($results | Where-Object Test -like 'budget-*' | Group-Object Fixture, Test))
+		{
+			$fresh = @{}
+			foreach ($row in ($group.Group | Where-Object Mode -eq 'fresh'))
+			{
+				$fresh[$row.Round] = $row
+			}
+			foreach ($modeGroup in ($group.Group | Group-Object Mode))
+			{
+				$ratios = @($modeGroup.Group | ForEach-Object { $_.LuminanceMse / $fresh[$_.Round].LuminanceMse } | Sort-Object)
+				$samples = @($modeGroup.Group.Samples | Sort-Object)
+				$median = [int][Math]::Floor($ratios.Count / 2)
+				[pscustomobject]@{
+					Fixture=$modeGroup.Group[0].Fixture; Test=$modeGroup.Group[0].Test; Mode=$modeGroup.Name
+					MedianMseRatio=$ratios[$median]; MinMseRatio=$ratios[0]; MaxMseRatio=$ratios[-1]
+					BeatsFresh=@($ratios | Where-Object { $_ -lt 1 }).Count
+					MedianSamples=$samples[$median]; MinSamples=$samples[0]; MaxSamples=$samples[-1]
+				}
+			}
+		}
+		$summary | Export-Csv -LiteralPath (Join-Path $output 'budget-summary.csv') -NoTypeInformation
+		$summary | Format-Table
+	}
+	else
+	{
+		$results | Format-Table Fixture, Test, Mode, GpuMilliseconds, Samples, @{Name='LuminanceMse'; Expression={ '{0:E4}' -f $_.LuminanceMse }}
+	}
 	return
 }
 
