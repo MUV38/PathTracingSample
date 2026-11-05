@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup>
+		<DxcExecutable>$([System.String]::Copy('$(WindowsSDK_ExecutablePath_x64)').Split(';')[0])\dxc.exe</DxcExecutable>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="$(RepositoryRoot)common\SampleFramework.vcxproj">
+			<Project>{15AB62DB-3209-43ED-874F-71EFA2815BAA}</Project>
+		</ProjectReference>
+		<ClCompile Include="$(MSBuildThisFileDirectory)ClasSandbox.cpp" />
+		<ClInclude Include="$(MSBuildThisFileDirectory)ClasSandbox.h" />
+		<ClInclude Include="$(MSBuildThisFileDirectory)ClasContext.h" />
+		<ClInclude Include="$(MSBuildThisFileDirectory)SceneBindings.hlsli" />
+		<CustomBuild Include="$(MSBuildThisFileDirectory)Reference.hlsl">
+			<Command>"$(DxcExecutable)" -T lib_6_5 -HV 2021 -WX -Zi -Qembed_debug -Fo "$(OutDir)Reference.dxil" "%(FullPath)"</Command>
+			<Outputs>$(OutDir)Reference.dxil</Outputs>
+			<AdditionalInputs>$(MSBuildThisFileDirectory)SceneBindings.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<Message>Compiling reference meshlet DXR shaders</Message>
+		</CustomBuild>
+		<CustomBuild Include="$(PreviewShaderSource)" Condition="'$(PreviewShaderSource)'!=''">
+			<Command>"$(PreviewDxcExecutable)" -T lib_6_10 -HV 2021 -WX -Zi -Qembed_debug -I "$(ProjectDir)." -I "$(MSBuildThisFileDirectory)." -Fo "$(OutDir)$(PreviewShaderOutput).dxil" "%(FullPath)"</Command>
+			<Outputs>$(OutDir)$(PreviewShaderOutput).dxil</Outputs>
+			<AdditionalInputs>$(MSBuildThisFileDirectory)SceneBindings.hlsli;%(AdditionalInputs)</AdditionalInputs>
+			<Message>Compiling user preview shader library (SM 6.10)</Message>
+		</CustomBuild>
+		<Content Include="$(RepositoryRoot)assets\PreviewRoom.ptscene">
+			<Link>assets\PreviewRoom.ptscene</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+	<Target Name="CheckShaderCompilers" BeforeTargets="CustomBuild">
+		<Error Condition="!Exists('$(DxcExecutable)')" Text="DXC was not found in the selected Windows SDK." />
+		<Error Condition="'$(PreviewShaderSource)'!='' And !Exists('$(PreviewDxcExecutable)')" Text="Set the local SM 6.10 preview DXC executable. See this sample's README." />
+	</Target>
+</Project>

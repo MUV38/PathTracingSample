@@ -96,7 +96,7 @@ void ClasSandbox::configure(const std::vector<std::wstring>& arguments)
 		}
 		else
 		{
-			throw std::runtime_error("ClasSandbox options: --model <file.ptscene>, --vertex-colors, --no-preview.");
+			throw std::runtime_error("Options: --model <file.ptscene>, --vertex-colors, --no-preview.");
 		}
 	}
 	// Must run before the framework creates any D3D12 device.
@@ -112,9 +112,22 @@ void ClasSandbox::configure(const std::vector<std::wstring>& arguments)
 	}
 }
 
+bool ClasCapabilities::available() const
+{
+	return SUCCEEDED(mEnablePreview) && SUCCEEDED(mFeatureQuery) && mClustersSupported
+		&& SUCCEEDED(mDeviceQuery) && SUCCEEDED(mCommandListQuery)
+		&& SUCCEEDED(mShaderModelQuery) && mShaderModel610;
+}
+
+bool ClasTraceState::ready() const
+{
+	return mTlas && mPipeline && mShaderTable;
+}
+
 ClasContext ClasSandbox::context(Renderer& renderer)
 {
-	return {renderer, mScene, mGpu, mCapabilities, mRootSignature.Get()};
+	return {renderer, mScene, mGpu, mCapabilities, mRootSignature.Get(),
+		mReferenceInstances, {mTlas.Get(), mPipeline.Get(), mShaderTable.Get()}};
 }
 
 void ClasSandbox::initialize(Renderer& renderer)
@@ -134,7 +147,13 @@ void ClasSandbox::initialize(Renderer& renderer)
 	mCapabilities.mShaderModelQuery = mDevice->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel));
 	mCapabilities.mShaderModel610 = SUCCEEDED(mCapabilities.mShaderModelQuery) && shaderModel.HighestShaderModel >= D3D_SHADER_MODEL_6_10;
 
-	if (mModelPath.empty())
+	const bool useDefaultScene = mModelPath.empty() && mOptions.mCreateDefaultScene;
+	if (useDefaultScene)
+	{
+		mModelPath = mOptions.mDefaultSceneName;
+		mScene = mOptions.mCreateDefaultScene();
+	}
+	else if (mModelPath.empty())
 	{
 		mModelPath = executableDirectory() / L"assets/PreviewRoom.ptscene";
 		for (auto directory = executableDirectory(); !directory.empty();)
@@ -160,9 +179,28 @@ void ClasSandbox::initialize(Renderer& renderer)
 			directory = parent;
 		}
 	}
-	mScene = readSceneFile(mModelPath);
-	const auto& minimum = mScene.mHeader.mMinimum;
-	const auto& maximum = mScene.mHeader.mMaximum;
+	if (!useDefaultScene)
+	{
+		mScene = readSceneFile(mModelPath);
+	}
+	auto minimum = mScene.mHeader.mMinimum;
+	auto maximum = mScene.mHeader.mMaximum;
+	mReferenceInstances.resize(useDefaultScene && !mOptions.mDefaultInstanceOffsets.empty() ? mOptions.mDefaultInstanceOffsets.size() : 1);
+	for (size_t i = 0; i < mReferenceInstances.size(); ++i)
+	{
+		auto& instance = mReferenceInstances[i];
+		const auto offset = useDefaultScene && !mOptions.mDefaultInstanceOffsets.empty()
+			? mOptions.mDefaultInstanceOffsets[i] : std::array<float, 3>{};
+		for (size_t axis = 0; axis < offset.size(); ++axis)
+		{
+			instance.Transform[axis][axis] = 1.0f;
+			instance.Transform[axis][3] = offset[axis];
+			minimum[axis] = (std::min)(minimum[axis], mScene.mHeader.mMinimum[axis] + offset[axis]);
+			maximum[axis] = (std::max)(maximum[axis], mScene.mHeader.mMaximum[axis] + offset[axis]);
+		}
+		instance.InstanceID = static_cast<UINT>(i);
+		instance.InstanceMask = 0xff;
+	}
 	mFocus = {(minimum[0] + maximum[0]) * 0.5f, (minimum[1] + maximum[1]) * 0.5f, (minimum[2] + maximum[2]) * 0.5f};
 	const float x = maximum[0] - minimum[0];
 	const float y = maximum[1] - minimum[1];
@@ -171,7 +209,7 @@ void ClasSandbox::initialize(Renderer& renderer)
 	buildAccelerationStructures(renderer);
 	createPipeline();
 	createShaderTable();
-	mExperiment.initialize(context(renderer));
+	mExperiment.mInitialize(context(renderer));
 	D3D12_DESCRIPTOR_HEAP_DESC heap{};
 	heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	heap.NumDescriptors = 1;
@@ -249,7 +287,7 @@ void ClasSandbox::buildAccelerationStructures(Renderer& renderer)
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs{};
 	tlasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 	tlasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-	tlasInputs.NumDescs = 1;
+	tlasInputs.NumDescs = static_cast<UINT>(mReferenceInstances.size());
 	tlasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasInfo{};
 	mDevice->GetRaytracingAccelerationStructurePrebuildInfo(&tlasInputs, &tlasInfo);
@@ -263,13 +301,12 @@ void ClasSandbox::buildAccelerationStructures(Renderer& renderer)
 		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
 	auto scratch = createBuffer(mDevice.Get(), (std::max)(blasInfo.ScratchDataSizeInBytes, tlasInfo.ScratchDataSizeInBytes),
 		D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	D3D12_RAYTRACING_INSTANCE_DESC instance{};
-	instance.Transform[0][0] = 1.0f;
-	instance.Transform[1][1] = 1.0f;
-	instance.Transform[2][2] = 1.0f;
-	instance.InstanceMask = 0xff;
-	instance.AccelerationStructure = mBlas->GetGPUVirtualAddress();
-	auto instances = uploadBuffer(mDevice.Get(), &instance, sizeof(instance));
+	for (auto& instance : mReferenceInstances)
+	{
+		instance.AccelerationStructure = mBlas->GetGPUVirtualAddress();
+	}
+	auto instances = uploadBuffer(mDevice.Get(), mReferenceInstances.data(),
+		mReferenceInstances.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
 	tlasInputs.InstanceDescs = instances->GetGPUVirtualAddress();
 
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{};
@@ -436,21 +473,22 @@ void ClasSandbox::drawGui()
 		// ImGui auto-sizing can change the panel width after its first layout.
 		mNeedsFrame = previousViewportLeft != mViewportLeft;
 	}
-	ImGui::TextUnformatted("CLAS Sandbox / Agility SDK 1.722-preview");
-	ImGui::TextWrapped("Rendering: %s", mUseClas ? "User CLAS experiment" : "Reference DXR (traditional BLAS/TLAS)");
+	ImGui::Text("%s / Agility SDK 1.722-preview", mOptions.mTitle);
+	ImGui::TextWrapped("Rendering: %s", mUseExperiment ? "User experiment" : "Reference DXR (traditional BLAS/TLAS)");
 	const auto filename = mModelPath.filename().u8string();
 	ImGui::Text("Scene: %s", reinterpret_cast<const char*>(filename.c_str()));
 	ImGui::Text("%zu meshlets / %zu triangles", mScene.mMeshlets.size(), mScene.mMeshletTriangles.size() / 3);
 	ImGui::TextWrapped("%zu vertices / max %u vertices, %u triangles per meshlet",
 		mScene.mVertices.size(), sceneMeshletMaxVertices, sceneMeshletMaxTriangles);
+	ImGui::Text("Reference instances: %zu", mReferenceInstances.size());
 	ImGui::Checkbox("Meshlet colors", &mMeshletColors);
-	const bool canTrace = mCapabilities.available() && mExperiment.traceState().ready();
+	const bool canTrace = mCapabilities.available() && mExperiment.mTraceState().ready();
 	ImGui::BeginDisabled(!canTrace);
-	ImGui::Checkbox("Use user CLAS implementation", &mUseClas);
+	ImGui::Checkbox("Use user implementation", &mUseExperiment);
 	ImGui::EndDisabled();
-	ImGui::TextWrapped("CLAS environment: %s", mCapabilities.available() ? "Available" : "Unavailable (see diagnostics)");
-	mExperiment.drawGui();
-	if (ImGui::CollapsingHeader("CLAS diagnostics", ImGuiTreeNodeFlags_DefaultOpen))
+	ImGui::TextWrapped("Preview environment: %s", mCapabilities.available() ? "Available" : "Unavailable (see diagnostics)");
+	mExperiment.mDrawGui();
+	if (ImGui::CollapsingHeader("Raytracing preview diagnostics", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		auto status = [](const char* name, HRESULT result)
 		{
@@ -480,7 +518,7 @@ void ClasSandbox::drawGui()
 
 void ClasSandbox::render(Renderer& renderer, ID3D12GraphicsCommandList* commandList, ID3D12Resource* backBuffer)
 {
-	PIXScopedEvent(commandList, PIX_COLOR(80, 160, 220), "CLAS Sandbox");
+	PIXScopedEvent(commandList, PIX_COLOR(80, 160, 220), "%s", mOptions.mTitle);
 	if (mWidth != renderer.width() || mHeight != renderer.height())
 	{
 		// The framework waits for the previous frame before resizing or reusing resources.
@@ -500,18 +538,18 @@ void ClasSandbox::render(Renderer& renderer, ID3D12GraphicsCommandList* commandL
 	check(commandList->QueryInterface(IID_PPV_ARGS(&commands)), "Query DXR command list");
 	if (mCapabilities.available())
 	{
-		PIXScopedEvent(commandList, PIX_COLOR(200, 140, 80), "User CLAS preparation hook");
-		mExperiment.record(context(renderer), commandList);
+		PIXScopedEvent(commandList, PIX_COLOR(200, 140, 80), "User experiment preparation hook");
+		mExperiment.mRecord(context(renderer), commandList);
 	}
-	const auto experiment = mExperiment.traceState();
-	const bool useClas = mUseClas && mCapabilities.available() && experiment.ready();
-	if (!useClas)
+	const auto experiment = mExperiment.mTraceState();
+	const bool useExperiment = mUseExperiment && mCapabilities.available() && experiment.ready();
+	if (!useExperiment)
 	{
-		mUseClas = false;
+		mUseExperiment = false;
 	}
-	ID3D12Resource* tlas = useClas ? experiment.mTlas : mTlas.Get();
-	ID3D12StateObject* pipeline = useClas ? experiment.mPipeline : mPipeline.Get();
-	ID3D12Resource* shaderTable = useClas ? experiment.mShaderTable : mShaderTable.Get();
+	ID3D12Resource* tlas = useExperiment ? experiment.mTlas : mTlas.Get();
+	ID3D12StateObject* pipeline = useExperiment ? experiment.mPipeline : mPipeline.Get();
+	ID3D12Resource* shaderTable = useExperiment ? experiment.mShaderTable : mShaderTable.Get();
 	ID3D12DescriptorHeap* heaps[] = {mSrvUavHeap.Get()};
 	commands->SetDescriptorHeaps(1, heaps);
 	commands->SetComputeRootSignature(mRootSignature.Get());
@@ -534,7 +572,7 @@ void ClasSandbox::render(Renderer& renderer, ID3D12GraphicsCommandList* commandL
 	dispatch.Height = mHeight;
 	dispatch.Depth = 1;
 	{
-		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), useClas ? "Trace user CLAS" : "Trace reference meshlets");
+		PIXScopedEvent(commands.Get(), PIX_COLOR(80, 160, 220), useExperiment ? "Trace user experiment" : "Trace reference meshlets");
 		commands->DispatchRays(&dispatch);
 	}
 
@@ -558,4 +596,21 @@ void ClasSandbox::render(Renderer& renderer, ID3D12GraphicsCommandList* commandL
 		std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
 	}
 	commands->ResourceBarrier(2, barriers);
+}
+
+int runClasSandbox(HINSTANCE instance, int showCommand, const ClasSandboxOptions& options, const ClasExperimentHooks& experiment)
+{
+	ClasSandbox sandbox(options, experiment);
+	Sample sample;
+	sample.mName = options.mWindowTitle;
+	sample.mRequireDxr = true;
+	sample.mConfigure = [&sandbox](const std::vector<std::wstring>& arguments) { sandbox.configure(arguments); };
+	sample.mInitialize = [&sandbox](Renderer& renderer) { sandbox.initialize(renderer); };
+	sample.mUpdate = [&sandbox](Renderer& renderer, float deltaTime) { sandbox.update(renderer, deltaTime); };
+	sample.mDrawGui = [&sandbox]() { sandbox.drawGui(); };
+	sample.mRender = [&sandbox](Renderer& renderer, ID3D12GraphicsCommandList* commands, ID3D12Resource* backBuffer)
+	{
+		sandbox.render(renderer, commands, backBuffer);
+	};
+	return runSample(instance, showCommand, sample);
 }

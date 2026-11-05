@@ -2,15 +2,48 @@
 
 #include "Camera.h"
 #include "CameraController.h"
-#include "ClasExperiment.h"
+#include "ClasContext.h"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
+
+struct ClasSandboxOptions
+{
+	const wchar_t* mWindowTitle;
+	const char* mTitle;
+	const wchar_t* mDefaultSceneName = nullptr;
+	SceneData (*mCreateDefaultScene)() = nullptr;
+	std::vector<std::array<float, 3>> mDefaultInstanceOffsets{};
+};
+
+struct ClasExperimentHooks
+{
+	std::function<void(const ClasContext&)> mInitialize;
+	std::function<void(const ClasContext&, ID3D12GraphicsCommandList*)> mRecord;
+	std::function<void()> mDrawGui;
+	std::function<ClasTraceState()> mTraceState;
+};
+
+int runClasSandbox(HINSTANCE instance, int showCommand, const ClasSandboxOptions& options, const ClasExperimentHooks& experiment);
+
+template<typename Experiment>
+ClasExperimentHooks bindClasExperiment(Experiment& experiment)
+{
+	return {
+		[&experiment](const ClasContext& context) { experiment.initialize(context); },
+		[&experiment](const ClasContext& context, ID3D12GraphicsCommandList* commands) { experiment.record(context, commands); },
+		[&experiment]() { experiment.drawGui(); },
+		[&experiment]() { return experiment.traceState(); }
+	};
+}
 
 class ClasSandbox final
 {
 public:
+	ClasSandbox(const ClasSandboxOptions& options, const ClasExperimentHooks& experiment)
+		: mOptions(options), mExperiment(experiment) {}
 	void configure(const std::vector<std::wstring>& arguments);
 	void initialize(Renderer& renderer);
 	void update(Renderer& renderer, float deltaTime);
@@ -45,9 +78,11 @@ private:
 	float mRadius = 1.0f;
 	bool mNeedsFrame = true;
 	bool mMeshletColors = true;
-	bool mUseClas = false;
+	bool mUseExperiment = false;
 	std::filesystem::path mModelPath;
 	SceneData mScene;
 	ClasCapabilities mCapabilities;
-	ClasExperiment mExperiment;
+	const ClasSandboxOptions& mOptions;
+	const ClasExperimentHooks& mExperiment;
+	std::vector<D3D12_RAYTRACING_INSTANCE_DESC> mReferenceInstances;
 };

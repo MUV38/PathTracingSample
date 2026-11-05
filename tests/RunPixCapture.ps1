@@ -24,6 +24,8 @@ $cases = @(
 	@{Name="clear"; Project="PathTracingSample"; Options=""; Markers=@()},
 	@{Name="cube"; Project="DxrCube"; Options=""; Markers=@("DXR Cube", "Trace cube", "Copy to back buffer")},
 	@{Name="clas-reference"; Project="ClasSandbox"; Options="--model assets/PreviewRoom.ptscene --no-preview"; Markers=@("CLAS Sandbox", "Trace reference meshlets", "Copy to back buffer")},
+	@{Name="cluster-templates-reference"; Project="ClusterTemplatesSandbox"; Options="--no-preview"; Markers=@("Cluster Templates Sandbox", "Trace reference meshlets", "Copy to back buffer")},
+	@{Name="ptlas-reference"; Project="PtlasSandbox"; Options="--no-preview"; Markers=@("PTLAS Sandbox", "Trace reference meshlets", "Copy to back buffer")},
 	@{Name="gi-temporal"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --specular 0 --restir-gi temporal --samples 128"; Markers=@("Path tracing", "GI=2", "Copy to back buffer")},
 	@{Name="gi-spatial"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --specular 0 --restir-gi spatial --samples 128"; Markers=@("GI / current raw candidate prepass", "Path tracing", "GI=3", "Copy to back buffer")},
 	@{Name="path-replay"; Project="UsdKitchen"; Options="--model assets/PreviewRoom.ptscene --path-replay-check --spp 4 --samples 32"; Markers=@("Path tracing / deterministic replay", "Copy to back buffer")},

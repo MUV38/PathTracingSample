@@ -5,6 +5,8 @@
 最小の例は `Clear/Main.cpp`、DXRの例は `DxrCube/` です。
 CLASの実装を自分で追加するための検証環境は [`ClasSandbox/`](ClasSandbox/README.md) です。meshlet入力、通常DXRの比較描画、対応状況の診断、空のCLAS実装箇所を用意しています。
 
+同じ土台で [Cluster Templates](ClusterTemplatesSandbox/README.md) と [PTLAS](PtlasSandbox/README.md) を個別に学べます。それぞれのプロジェクトに手続き生成の初期シーンと実験コードの入口があります。
+
 1. `samples/MySample/` に `Main.cpp` と以下の `MySample.vcxproj` を配置します。GUIDは新しく生成してください。
 2. ルートの `PathTracingSample.slnx` の `/Samples/` に `<Project Path="samples/MySample/MySample.vcxproj" />` を追加します。
 3. ソリューションのNuGetパッケージを復元し、新しいプロジェクトをスタートアップに指定します。

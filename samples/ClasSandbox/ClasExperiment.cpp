@@ -2,18 +2,6 @@
 
 #include <imgui.h>
 
-bool ClasCapabilities::available() const
-{
-	return SUCCEEDED(mEnablePreview) && SUCCEEDED(mFeatureQuery) && mClustersSupported
-		&& SUCCEEDED(mDeviceQuery) && SUCCEEDED(mCommandListQuery)
-		&& SUCCEEDED(mShaderModelQuery) && mShaderModel610;
-}
-
-bool ClasTraceState::ready() const
-{
-	return mTlas && mPipeline && mShaderTable;
-}
-
 void ClasExperiment::initialize(const ClasContext& context)
 {
 	// TODO(user): query prebuild sizes, allocate resources and prepare CLAS inputs.

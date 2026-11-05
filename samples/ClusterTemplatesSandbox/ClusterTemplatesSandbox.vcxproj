@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals">
+		<ProjectGuid>{696BA435-78F4-43E6-9127-E225812F056C}</ProjectGuid>
+	</PropertyGroup>
+	<Import Project="..\..\build_support\Cpp.props" />
+	<Import Project="..\..\build_support\ClusterTemplates.local.props" Condition="Exists('..\..\build_support\ClusterTemplates.local.props')" />
+	<PropertyGroup>
+		<PreviewDxcExecutable>$(ClusterTemplatesDxcExecutable)</PreviewDxcExecutable>
+		<PreviewShaderSource>$(ClusterTemplatesShaderSource)</PreviewShaderSource>
+		<PreviewShaderOutput>ClusterTemplates</PreviewShaderOutput>
+	</PropertyGroup>
+	<ItemGroup>
+		<ClCompile Include="Main.cpp" />
+		<ClCompile Include="ClusterTemplatesExperiment.cpp" />
+		<ClInclude Include="ClusterTemplatesExperiment.h" />
+		<None Include="README.md" />
+	</ItemGroup>
+	<Import Project="..\ClasSandbox\PreviewSandbox.targets" />
+	<Import Project="..\..\build_support\Cpp.targets" />
+</Project>

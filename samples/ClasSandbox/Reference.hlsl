@@ -66,6 +66,7 @@ void CHS_Main(inout Payload payload, in BuiltInTriangleIntersectionAttributes at
 	if (meshletColors != 0u)
 	{
 		uint hash = (meshletIndex + 1u) * 747796405u + 2891336453u;
+		hash ^= InstanceID() * 0x9e3779b9u;
 		hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
 		hash = (hash >> 22u) ^ hash;
 		albedo = 0.15f + 0.85f * float3(hash & 255u, (hash >> 8u) & 255u, (hash >> 16u) & 255u) / 255.0f;
