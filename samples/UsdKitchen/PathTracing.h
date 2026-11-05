@@ -22,4 +22,5 @@ struct PathTracing
 	bool mHybridUnoptimized = false;
 	uint32_t mPtReservoirConfidence = 8;
 	uint32_t mSeed = 0;
+	uint32_t mPtRefreshPeriod = 0;
 };

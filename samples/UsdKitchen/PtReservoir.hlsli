@@ -11,6 +11,16 @@ float3 temporalPtReservoir(GiCandidate current, uint2 pixel, uint sampleIndex, o
 		return fresh;
 	}
 	uint2 dimensions = DispatchRaysDimensions().xy;
+	if (ptRefreshPeriod != 0)
+	{
+		// Fix each pixel's phase independently of the path and of the sampling RNG.
+		uint phaseState = (pixel.x + pixel.y * dimensions.x) ^ 0x27d4eb2du;
+		uint phase = uint(random(phaseState) * ptRefreshPeriod);
+		if (restirFrame % ptRefreshPeriod == phase)
+		{
+			return fresh;
+		}
+	}
 	float2 previousPixel = reprojectPrimary(current.sourcePosition, previousViewProjection, dimensions, previousViewportLeft);
 	diagnostic = float3(1, 0, 0);
 	if (!all(isfinite(previousPixel)) || any(previousPixel < float2(previousViewportLeft, 0)) || any(previousPixel >= dimensions))

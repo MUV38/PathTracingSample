@@ -125,7 +125,7 @@ struct SceneConstants
 	uint32_t mHistoryValid = 0;
 	uint32_t mRestirFrame = 0;
 	uint32_t mGiHistoryValid = 0;
-	float mHistoryPadding = 0;
+	uint32_t mPtRefreshPeriod = 0;
 	DirectX::XMFLOAT4X4 mPreviousViewProjection{};
 	float mPreviousViewportLeft = 0;
 	std::array<float,3> mPreviousCameraPadding{};
@@ -701,6 +701,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
 	constants.mPtReservoirConfidence = std::clamp(tracing.mPtReservoirConfidence, 2u, 8u);
 	constants.mSeed = tracing.mSeed;
+	constants.mPtRefreshPeriod = tracing.mPtRefreshPeriod;
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;

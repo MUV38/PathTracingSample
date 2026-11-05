@@ -93,7 +93,7 @@ cbuffer SceneConstants : register(b0)
 	uint historyValid;
 	uint restirFrame;
 	uint giHistoryValid;
-	float historyPadding;
+	uint ptRefreshPeriod;
 	row_major float4x4 previousViewProjection;
 	float previousViewportLeft;
 	float3 previousCameraPadding;

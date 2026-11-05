@@ -168,6 +168,70 @@ public static class GiImageMetrics
 	{
 		return .2126 * Linear(pixel.R) + .7152 * Linear(pixel.G) + .0722 * Linear(pixel.B);
 	}
+	public static double[] TemporalCorrelation(string referencePath, string[] framePaths, int[] lags)
+	{
+		Point[] points;
+		int pointCount = 0;
+		Size size;
+		using (var reference = new Bitmap(referencePath))
+		{
+			size = reference.Size;
+			points = new Point[((size.Width + 3) / 4) * ((size.Height + 3) / 4)];
+			for (int y = 0; y < size.Height; y += 4)
+			{
+				for (int x = (int)(size.Width * .65); x < size.Width; x += 4)
+				{
+					if (Luminance(reference.GetPixel(x, y)) >= .0003)
+					{
+						points[pointCount++] = new Point(x, y);
+					}
+				}
+			}
+		}
+		if (pointCount < 100)
+		{
+			throw new Exception("Empty diffuse-GI reference");
+		}
+		var frames = new double[framePaths.Length, pointCount];
+		var means = new double[pointCount];
+		for (int i = 0; i < framePaths.Length; ++i)
+		{
+			using (var frame = new Bitmap(framePaths[i]))
+			{
+				if (frame.Size != size)
+				{
+					throw new ArgumentException("Temporal frame size differs from reference");
+				}
+				for (int p = 0; p < pointCount; ++p)
+				{
+					frames[i, p] = Luminance(frame.GetPixel(points[p].X, points[p].Y));
+					means[p] += frames[i, p] / framePaths.Length;
+				}
+			}
+		}
+		var result = new double[lags.Length];
+		for (int l = 0; l < lags.Length; ++l)
+		{
+			int lag = lags[l];
+			double product = 0, firstEnergy = 0, secondEnergy = 0;
+			for (int i = 0; i + lag < framePaths.Length; ++i)
+			{
+				for (int p = 0; p < pointCount; ++p)
+				{
+					double a = frames[i, p] - means[p], b = frames[i + lag, p] - means[p];
+					product += a * b;
+					firstEnergy += a * a;
+					secondEnergy += b * b;
+				}
+			}
+			if (firstEnergy == 0 || secondEnergy == 0)
+			{
+				throw new Exception("Temporal sequence has no variation");
+			}
+			result[l] = product / Math.Sqrt(firstEnergy * secondEnergy);
+		}
+		return result;
+	}
 	public static double[] SeedError(string referencePath, string[] samplePaths)
 	{
 		using (var reference = new Bitmap(referencePath))
