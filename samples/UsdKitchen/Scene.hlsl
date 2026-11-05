@@ -370,7 +370,7 @@ void RGS_Main()
 	uint state = (pixel.x + pixel.y * DispatchRaysDimensions().x) ^ (sampleSeed * 0x9e3779b9u);
 	bool fixedGiGuide = giView >= 4 && giView <= 6;
 	const bool hybridGi = giEnabled == 5 || giEnabled == 6;
-	const bool fullPrimaryGi = giEnabled == 4 || giEnabled == 7;
+	const bool fullPrimaryGi = giEnabled == 4 || giEnabled >= 7;
 	state ^= ((fixedGiGuide ? 0u : (giEnabled >= 2 ? restirFrame : (rrEnabled != 0 ? rrFrame : frameIndex))) + 1u) * 277803737u;
 	if (restirPass == 3)
 	{

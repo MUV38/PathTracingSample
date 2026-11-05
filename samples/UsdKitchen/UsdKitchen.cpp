@@ -347,11 +347,12 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 		if (flag == L"--restir-pt" && index + 1 < arguments.size())
 		{
 			const auto& value = arguments[++index];
-			if (value != L"temporal" && value != L"hybrid" && value != L"reservoir" && value != L"spatial" && value != L"off")
+			if (value != L"temporal" && value != L"hybrid" && value != L"reservoir" && value != L"spatial" && value != L"spatiotemporal" && value != L"off")
 			{
-				throw std::runtime_error("--restir-pt expects off, temporal, hybrid, reservoir, or spatial.");
+				throw std::runtime_error("--restir-pt expects off, temporal, hybrid, reservoir, spatial, or spatiotemporal.");
 			}
-			mTracing.mGiMode = value == L"spatial" ? 7u : value == L"reservoir" ? 6u : value == L"hybrid" ? 5u : value == L"temporal" ? 4u : 0u;
+			mTracing.mGiMode = value == L"spatiotemporal" ? 8u : value == L"spatial" ? 7u : value == L"reservoir" ? 6u
+				: value == L"hybrid" ? 5u : value == L"temporal" ? 4u : 0u;
 			continue;
 		}
 		if (flag == L"--path-replay" || flag == L"--path-replay-check")
@@ -1022,7 +1023,7 @@ void UsdKitchen::drawGui()
 	if (ImGui::CollapsingHeader("ReSTIR GI"))
 	{
 		int mode = static_cast<int>(mTracing.mGiMode);
-		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0PT temporal (full primary BSDF)\0PT hybrid (one glossy bounce)\0PT temporal reservoir\0PT spatial (one paired neighbor)\0");
+		ImGui::Combo("GI sampling", &mode, "Ordinary PT\0Initial candidates\0Temporal (one previous raw sample)\0Temporal + spatial (four raw neighbors)\0PT temporal (full primary BSDF)\0PT hybrid (one glossy bounce)\0PT temporal reservoir\0PT spatial (one paired neighbor)\0PT spatiotemporal (one previous, one neighbor)\0");
 		mTracing.mGiMode = static_cast<uint32_t>(mode);
 		ImGui::Checkbox("Reuse previous GI candidate", &mTracing.mGiHistory);
 		ImGui::Checkbox("Reuse neighboring GI candidates", &mTracing.mGiSpatial);
@@ -1032,6 +1033,7 @@ void UsdKitchen::drawGui()
 		ImGui::TextWrapped("Temporal and PT temporal reuse one previous raw candidate. PT temporal uses the full primary BSDF, including rough metals. Spatial mode reuses four current raw neighbors for diffuse GI.");
 		ImGui::TextWrapped("PT hybrid and PT temporal reservoir replay one glossy bounce, then reconnect from a rough surface to a flat Lambertian vertex. The reservoir saves the selected path and its weight for the next frame. Diagnostic views bypass RR.");
 		ImGui::TextWrapped("PT spatial reuses one current raw neighbor with the full primary BSDF. It uses one candidate buffer and no temporal history.");
+		ImGui::TextWrapped("PT spatiotemporal adds one previous raw candidate to the spatial pair.");
 		ImGui::TextWrapped("168 bytes/pixel per buffer. Modes with temporal history use two buffers; only the first sample is saved. Spatial modes add a one-path/pixel prepass. Changing lighting/materials, resize, reset or camera cuts discards history.");
 	}
 	if (ImGui::CollapsingHeader("DLSS Ray Reconstruction", ImGuiTreeNodeFlags_DefaultOpen))

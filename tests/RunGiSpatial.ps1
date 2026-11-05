@@ -45,26 +45,34 @@ if ($FullBsdf)
 		Capture "$fixture-reference" '--restir-pt temporal --no-gi-history --gi-view diffuse --samples 2048 --spp 16 --seed 101' $model | Write-Host
 		Capture "$fixture-ordinary" '--restir-pt off --samples 512 --spp 4' $model | Write-Host
 		Capture "$fixture-spatial-total" '--restir-pt spatial --samples 512 --spp 4' $model | Write-Host
+		Capture "$fixture-spatiotemporal-total" '--restir-pt spatiotemporal --samples 512 --spp 4' $model | Write-Host
 		$ordinary = [GiImageMetrics]::Read((Join-Path $output "$fixture-ordinary.png"))
-		$spatial = [GiImageMetrics]::Read((Join-Path $output "$fixture-spatial-total.png"))
-		for ($channel = 0; $channel -lt 3; ++$channel)
+		foreach ($mode in @('spatial','spatiotemporal'))
 		{
-			if ([Math]::Abs($ordinary[$channel] - $spatial[$channel]) -gt 0.0003 + 0.04 * $ordinary[$channel])
+			$actual = [GiImageMetrics]::Read((Join-Path $output "$fixture-$mode-total.png"))
+			for ($channel = 0; $channel -lt 3; ++$channel)
 			{
-				throw "PT spatial energy differs from ordinary PT: $fixture, channel $channel."
+				if ([Math]::Abs($ordinary[$channel] - $actual[$channel]) -gt 0.0003 + 0.04 * $ordinary[$channel])
+				{
+					throw "PT $mode energy differs from ordinary PT: $fixture, channel $channel."
+				}
 			}
 		}
-		Capture "$fixture-selected" '--restir-pt spatial --gi-view spatial --samples 16 --spp 1' $model | Write-Host
-		$guide = [GiImageMetrics]::Read((Join-Path $output "$fixture-selected.png"))
-		if ($guide[4] -lt 500 -or $guide[5] -lt 20)
+		foreach ($view in @('spatial','history'))
 		{
-			throw "PT spatial did not accept and select a neighbor: $fixture."
+			$name = "$fixture-selected-$view"
+			Capture $name "--restir-pt spatiotemporal --gi-view $view --samples 16 --spp 1" $model | Write-Host
+			$guide = [GiImageMetrics]::Read((Join-Path $output "$name.png"))
+			if ($guide[4] -lt 500 -or $guide[5] -lt 20)
+			{
+				throw "PT spatiotemporal did not accept and select the $view proposal: $fixture."
+			}
 		}
 		$fixedCount = 0
 		foreach ($test in @('fixed','budget'))
 		{
 			$target = if ($test -eq 'fixed') { '--samples 128' } else { '--samples 1 --gpu-budget-ms 1000' }
-			foreach ($mode in @('fresh','temporal','spatial'))
+			foreach ($mode in @('fresh','temporal','spatial','spatiotemporal'))
 			{
 				$options = if ($mode -eq 'fresh') { '--restir-pt temporal --no-gi-history' } else { "--restir-pt $mode" }
 				$name = "$fixture-$test-$mode"
@@ -92,12 +100,35 @@ if ($FullBsdf)
 				[pscustomobject]@{Fixture=$fixture; Test=$test; Mode=$mode; Samples=$count; GpuMs=$stats.Sum; Mse=[GiImageMetrics]::Mse($reference,$png)}
 			}
 		}
-		Capture "$fixture-disabled" '--restir-pt spatial --no-gi-spatial --gi-view diffuse --samples 128 --spp 1' $model | Write-Host
-		$fresh = Join-Path $output "$fixture-fixed-fresh.png"
-		if ([GiImageMetrics]::MaxDifference($fresh, (Join-Path $output "$fixture-disabled.png")) -ne 0)
+		foreach ($ablation in @(
+			@{Name='fresh'; Options='--no-gi-spatial --no-gi-history'},
+			@{Name='spatial'; Options='--no-gi-history'},
+			@{Name='temporal'; Options='--no-gi-spatial'}
+		))
 		{
-			throw "Disabling PT spatial must match fresh-only output: $fixture."
+			$name = "$fixture-ablation-$($ablation.Name)"
+			Capture $name "--restir-pt spatiotemporal $($ablation.Options) --gi-view diffuse --samples 128 --spp 1" $model | Write-Host
+			$expected = Join-Path $output "$fixture-fixed-$($ablation.Name).png"
+			if ([GiImageMetrics]::MaxDifference($expected, (Join-Path $output "$name.png")) -gt 1)
+			{
+				throw "PT spatiotemporal ablation differs from $($ablation.Name): $fixture."
+			}
 		}
+	}
+	$csv = Join-Path $output 'camera.csv'
+	Capture 'motion' ('--restir-pt spatiotemporal --gi-view history --samples 1 --spp 1 --screenshot-count 32 --gi-validation "{0}"' -f $csv)
+	$rows = @(Import-Csv -LiteralPath $csv)
+	$cut = $rows | Where-Object event -eq 'cut' | Select-Object -First 1
+	$next = $rows | Where-Object { [int]$_.frame -eq [int]$cut.frame + 1 } | Select-Object -First 1
+	if (!$cut -or $cut.history -ne '0' -or !$next -or $next.history -ne '1')
+	{
+		throw 'PT spatiotemporal history did not reset and resume after a camera cut.'
+	}
+	$index = [int]$cut.frame - ($rows.Count - 32)
+	$cutImage = Join-Path $output ('motion-{0:D4}.png' -f $index)
+	if ([GiImageMetrics]::Read($cutImage)[5] -ne 0)
+	{
+		throw 'PT spatiotemporal selected history on the camera cut.'
 	}
 	$results | Export-Csv -LiteralPath (Join-Path $output 'evaluation.csv') -NoTypeInformation
 	$results | Format-Table Fixture, Test, Mode, Samples, GpuMs, @{Name='Mse'; Expression={ '{0:E4}' -f $_.Mse }}

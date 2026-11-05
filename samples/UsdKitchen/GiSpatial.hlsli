@@ -1,4 +1,4 @@
-// Current raw draw + one previous draw + four current-frame neighbors.
+// Current raw draw, optional previous draw, and current-frame neighbors.
 // All proposal inclusion tests depend only on primary surfaces, including null draws.
 float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic, out float3 spatialDiagnostic)
 {
@@ -31,7 +31,7 @@ float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 
 		}
 	}
 	const int2 offsets[4] = {int2(2, 0), int2(0, 2), int2(-2, 0), int2(0, -2)};
-	const bool ptSpatial = giEnabled == 7;
+	const bool ptSpatial = giEnabled >= 7;
 	const uint neighborLimit = ptSpatial ? 1u : 4u;
 	uint neighbors = 0;
 	for (uint i = 0; i < neighborLimit; ++i)
@@ -60,7 +60,7 @@ float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 
 		}
 	}
 	spatialDiagnostic = float3(0, float(neighbors) / float(neighborLimit), 0);
-	if (ptSpatial && neighbors == 0)
+	if (ptSpatial && count == 1)
 	{
 		return fresh;
 	}
