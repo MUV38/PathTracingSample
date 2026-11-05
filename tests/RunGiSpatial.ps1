@@ -1,10 +1,12 @@
 param(
 	[ValidateSet("Debug", "Release")]
-	[string]$Configuration = "Debug"
+	[string]$Configuration = "Debug",
+	[switch]$FullBsdf
 )
 $ErrorActionPreference = "Stop"
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$output = Join-Path $repository "build/checks/gi-spatial-$Configuration"
+$namePrefix = if ($FullBsdf) { 'pt-spatial' } else { 'gi-spatial' }
+$output = Join-Path $repository "build/checks/$namePrefix-$Configuration"
 [IO.Directory]::CreateDirectory($output) | Out-Null
 $binary = Join-Path $repository "build/x64/$Configuration"
 $viewer = Join-Path $binary "UsdKitchen/UsdKitchen.exe"
@@ -32,6 +34,74 @@ function Capture([string]$name, [string]$options, [string]$model = (Join-Path $f
 		throw "Capture failed: $name. $(Get-Content -LiteralPath $stderr -Raw)"
 	}
 	Write-Output "$name : exit 0"
+}
+
+if ($FullBsdf)
+{
+	$results = foreach ($fixture in @('gi-colored','gi-rough-metal'))
+	{
+		$model = Join-Path $fixtures "$fixture.ptscene"
+		$reference = Join-Path $output "$fixture-reference.png"
+		Capture "$fixture-reference" '--restir-pt temporal --no-gi-history --gi-view diffuse --samples 2048 --spp 16 --seed 101' $model | Write-Host
+		Capture "$fixture-ordinary" '--restir-pt off --samples 512 --spp 4' $model | Write-Host
+		Capture "$fixture-spatial-total" '--restir-pt spatial --samples 512 --spp 4' $model | Write-Host
+		$ordinary = [GiImageMetrics]::Read((Join-Path $output "$fixture-ordinary.png"))
+		$spatial = [GiImageMetrics]::Read((Join-Path $output "$fixture-spatial-total.png"))
+		for ($channel = 0; $channel -lt 3; ++$channel)
+		{
+			if ([Math]::Abs($ordinary[$channel] - $spatial[$channel]) -gt 0.0003 + 0.04 * $ordinary[$channel])
+			{
+				throw "PT spatial energy differs from ordinary PT: $fixture, channel $channel."
+			}
+		}
+		Capture "$fixture-selected" '--restir-pt spatial --gi-view spatial --samples 16 --spp 1' $model | Write-Host
+		$guide = [GiImageMetrics]::Read((Join-Path $output "$fixture-selected.png"))
+		if ($guide[4] -lt 500 -or $guide[5] -lt 20)
+		{
+			throw "PT spatial did not accept and select a neighbor: $fixture."
+		}
+		$fixedCount = 0
+		foreach ($test in @('fixed','budget'))
+		{
+			$target = if ($test -eq 'fixed') { '--samples 128' } else { '--samples 1 --gpu-budget-ms 1000' }
+			foreach ($mode in @('fresh','temporal','spatial'))
+			{
+				$options = if ($mode -eq 'fresh') { '--restir-pt temporal --no-gi-history' } else { "--restir-pt $mode" }
+				$name = "$fixture-$test-$mode"
+				$csv = Join-Path $output "$name.csv"
+				Capture $name ('{0} {1} --gi-view diffuse --spp 1 --gpu-timing "{2}"' -f $options,$target,$csv) $model | Write-Host
+				$rows = @(Import-Csv -LiteralPath $csv)
+				$stats = $rows | ForEach-Object { [double]$_.gpu_ms } | Measure-Object -Sum -Maximum
+				$count = [int]$rows[-1].samples
+				if ($test -eq 'fixed')
+				{
+					if ($fixedCount -eq 0)
+					{
+						$fixedCount = $count
+					}
+					if ($count -lt 128 -or $count -ne $fixedCount)
+					{
+						throw "Sample count differs: $name"
+					}
+				}
+				elseif ($stats.Sum -lt 1000 -or $stats.Sum -gt 1000 + 2 * $stats.Maximum)
+				{
+					throw "Unexpected GPU budget: $name"
+				}
+				$png = Join-Path $output "$name.png"
+				[pscustomobject]@{Fixture=$fixture; Test=$test; Mode=$mode; Samples=$count; GpuMs=$stats.Sum; Mse=[GiImageMetrics]::Mse($reference,$png)}
+			}
+		}
+		Capture "$fixture-disabled" '--restir-pt spatial --no-gi-spatial --gi-view diffuse --samples 128 --spp 1' $model | Write-Host
+		$fresh = Join-Path $output "$fixture-fixed-fresh.png"
+		if ([GiImageMetrics]::MaxDifference($fresh, (Join-Path $output "$fixture-disabled.png")) -ne 0)
+		{
+			throw "Disabling PT spatial must match fresh-only output: $fixture."
+		}
+	}
+	$results | Export-Csv -LiteralPath (Join-Path $output 'evaluation.csv') -NoTypeInformation
+	$results | Format-Table Fixture, Test, Mode, Samples, GpuMs, @{Name='Mse'; Expression={ '{0:E4}' -f $_.Mse }}
+	return
 }
 
 # Compare total energy on the blocker scene and RGB of the replaceable diffuse

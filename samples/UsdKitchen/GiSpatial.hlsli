@@ -31,10 +31,21 @@ float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 
 		}
 	}
 	const int2 offsets[4] = {int2(2, 0), int2(0, 2), int2(-2, 0), int2(0, -2)};
+	const bool ptSpatial = giEnabled == 7;
+	const uint neighborLimit = ptSpatial ? 1u : 4u;
 	uint neighbors = 0;
-	for (uint i = 0; i < 4; ++i)
+	for (uint i = 0; i < neighborLimit; ++i)
 	{
-		int2 neighborPixel = int2(pixel) + offsets[i];
+		int2 offset = offsets[i];
+		if (ptSpatial)
+		{
+			// Alternate axis and stagger the pairs. This maps both pixels in a pair to each other.
+			bool vertical = (restirFrame & 1u) != 0;
+			uint coordinate = vertical ? pixel.y : pixel.x;
+			int step = ((coordinate + (restirFrame >> 1u)) & 1u) == 0 ? 1 : -1;
+			offset = vertical ? int2(0, step) : int2(step, 0);
+		}
+		int2 neighborPixel = int2(pixel) + offset;
 		if (neighborPixel.x < int(ceil(viewportLeft)) || neighborPixel.y < 0 || any(neighborPixel >= int2(dimensions)))
 		{
 			continue;
@@ -42,16 +53,20 @@ float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 
 		uint2 address = uint2(neighborPixel);
 		GiCandidate neighbor = giCandidates[address.x + address.y * dimensions.x];
 		// Four-pixel world footprint leaves room for two-pixel offsets and jitter.
-		if (compatibleGiSources(current, neighbor, 2))
+		if (compatibleGiSources(current, neighbor, 2) && (!ptSpatial || compatibleGiSources(neighbor, current, 2)))
 		{
 			proposals[count++] = neighbor;
 			++neighbors;
 		}
 	}
-	spatialDiagnostic = float3(0, float(neighbors) / 4, 0);
+	spatialDiagnostic = float3(0, float(neighbors) / float(neighborLimit), 0);
+	if (ptSpatial && neighbors == 0)
+	{
+		return fresh;
+	}
 	float ratio = rcp(float(samplesPerFrame));
 	uint state = (pixel.x + pixel.y * dimensions.x) ^ ((restirFrame + 1u) * 0x9e3779b9u)
-		^ ((sampleIndex + 1u) * 0x85ebca6bu);
+		^ ((sampleIndex + 1u) * 0x85ebca6bu) ^ (sampleSeed * 0xc2b2ae35u);
 	float3 result = 0;
 	uint selectedIndex = 6;
 	for (uint j = 0; j < count; ++j)
@@ -75,7 +90,12 @@ float3 spatialGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 
 		}
 		Surface surface = giSourceSurface(current);
 		float3 direction = normalize(lightSample.position - surface.position);
-		float3 integrand = giDiffuseBrdfCosine(surface, current.sourceView, direction) * lightSample.radiance
+		float3 factor = giDiffuseBrdfCosine(surface, current.sourceView, direction);
+		if (ptSpatial)
+		{
+			factor = j == 0 ? current.diffuseBrdfCosine : giFullPrimaryFactor(surface, current.sourceView, direction);
+		}
+		float3 integrand = factor * lightSample.radiance
 			* giConnectionJacobian(lightSample, surface.position);
 		float3 estimate = giBalanceEstimate(integrand * (j == 0 ? 1 : ratio), denominator, 0);
 		bool selected;
