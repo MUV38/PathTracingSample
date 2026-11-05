@@ -359,6 +359,22 @@ void UsdKitchen::configure(const std::vector<std::wstring>& arguments)
 			mTracing.mPathReplay = flag == L"--path-replay-check" ? 2u : 1u;
 			continue;
 		}
+		if (flag == L"--pt-refresh-period")
+		{
+			if (index + 1 >= arguments.size())
+			{
+				throw std::runtime_error("--pt-refresh-period expects 0..256.");
+			}
+			const auto& value = arguments[++index];
+			size_t consumed = 0;
+			const auto period = std::stoull(value, &consumed);
+			if (consumed != value.size() || period > 256 || value.find_first_not_of(L"0123456789") != std::wstring::npos)
+			{
+				throw std::runtime_error("--pt-refresh-period expects 0..256.");
+			}
+			mTracing.mPtRefreshPeriod = static_cast<uint32_t>(period);
+			continue;
+		}
 		if (flag == L"--seed")
 		{
 			if (index + 1 >= arguments.size())

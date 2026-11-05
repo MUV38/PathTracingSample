@@ -6,9 +6,14 @@ param(
 	[switch]$Reservoir,
 	[switch]$EvaluateReservoir,
 	[switch]$RepeatBudget,
-	[switch]$DiagnoseHistory
+	[switch]$DiagnoseHistory,
+	[switch]$EvaluateRefresh
 )
 $ErrorActionPreference = 'Stop'
+if ($EvaluateRefresh)
+{
+	$EvaluateReservoir = $true
+}
 if ($RepeatBudget -and !$EvaluateReservoir)
 {
 	throw '-RepeatBudget requires -EvaluateReservoir.'
@@ -18,6 +23,10 @@ $testName = 'pt-hybrid'
 if ($DiagnoseHistory)
 {
 	$testName = 'pt-history-diagnostics'
+}
+elseif ($EvaluateRefresh)
+{
+	$testName = 'pt-refresh'
 }
 elseif ($RepeatBudget)
 {
@@ -154,6 +163,43 @@ if ($EvaluateReservoir)
 			throw "Reservoir did not reach confidence $cap or select history."
 		}
 	}
+	if ($EvaluateRefresh)
+	{
+		$modes = @(
+			$modes | Where-Object Name -in @('fresh','cap2','cap8')
+		)
+		foreach ($period in @(4,8))
+		{
+			$modes += @{Name="refresh$period"; Options="--restir-pt reservoir --pt-refresh-period $period"}
+		}
+		$lags = @(1,2,4,8)
+		$frameCount = 64
+		$correlations = foreach ($fixture in @('mirror','glossy'))
+		{
+			$mask = Capture "$fixture-correlation-reference" $fixture '--restir-pt reservoir --no-gi-history --samples 2048 --spp 16 --seed 101 --gi-view diffuse'
+			foreach ($mode in $modes)
+			{
+				$name = "$fixture-correlation-$($mode.Name)"
+				$null = Capture $name $fixture "$($mode.Options) --seed 1 --samples 32 --spp 1 --gi-view diffuse-noisy --screenshot-count $frameCount"
+				[string[]]$frames = foreach ($frame in 0..($frameCount - 1))
+				{
+					Join-Path $output ('{0}-{1:D4}.png' -f $name,$frame)
+				}
+				$coefficients = [GiImageMetrics]::TemporalCorrelation($mask, $frames, $lags)
+				for ($i = 0; $i -lt $lags.Count; ++$i)
+				{
+					[pscustomobject]@{Fixture=$fixture; Mode=$mode.Name; Lag=$lags[$i]; Correlation=$coefficients[$i]}
+				}
+			}
+		}
+		$correlations | Export-Csv -LiteralPath (Join-Path $output 'temporal-correlation.csv') -NoTypeInformation
+		$fresh = Capture 'refresh-check-fresh' 'mirror' '--restir-pt reservoir --no-gi-history --samples 16 --spp 1 --gi-view diffuse'
+		$everyFrame = Capture 'refresh-check-every-frame' 'mirror' '--restir-pt reservoir --pt-refresh-period 1 --samples 16 --spp 1 --gi-view diffuse'
+		if ([GiImageMetrics]::MaxDifference($fresh, $everyFrame) -ne 0)
+		{
+			throw 'Refreshing every frame differs from disabling history.'
+		}
+	}
 	$results = foreach ($fixture in @('mirror','glossy'))
 	{
 		$referenceOptions = '--restir-pt reservoir --no-gi-history --samples 2048 --spp 16'
@@ -208,9 +254,11 @@ if ($EvaluateReservoir)
 					{
 						throw "Unexpected GPU budget: $name"
 					}
+					$reference = $references[$test.Component]
 					[pscustomobject]@{
 						Fixture=$fixture; Test=$test.Name; Mode=$mode.Name; Round=$round + 1; Position=$position + 1
-						GpuMilliseconds=$stats.Sum; Samples=$count; LuminanceMse=[GiImageMetrics]::Mse($references[$test.Component],$png)
+						GpuMilliseconds=$stats.Sum; Samples=$count; LuminanceMse=[GiImageMetrics]::Mse($reference,$png)
+						MeanLuminanceError=([GiImageMetrics]::Read($png)[3] - [GiImageMetrics]::Read($reference)[3])
 					}
 				}
 			}
