@@ -42,7 +42,7 @@ CLAS対応環境でも、ユーザー実装が描画リソースを返すまで�
 
 ## 対応状況
 
-`CLAS diagnostics` に、experimental featuresの有効化、Raytracing2機能照会、
+`Raytracing preview diagnostics` に、experimental featuresの有効化、Raytracing2機能照会、
 device / command-listインターフェース取得のHRESULT、`ClustersAndPTLASSupported`、SM 6.10を表示します。
 一つでも前提を満たさなければ通常DXRだけで動作します。DXR対応自体は必須です。
 

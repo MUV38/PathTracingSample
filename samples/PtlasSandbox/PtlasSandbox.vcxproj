@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup Label="Globals">
+		<ProjectGuid>{BF94BEC1-B977-4437-9557-0FC3942C4BC1}</ProjectGuid>
+	</PropertyGroup>
+	<Import Project="..\..\build_support\Cpp.props" />
+	<Import Project="..\..\build_support\Ptlas.local.props" Condition="Exists('..\..\build_support\Ptlas.local.props')" />
+	<PropertyGroup>
+		<PreviewDxcExecutable>$(PtlasDxcExecutable)</PreviewDxcExecutable>
+		<PreviewShaderSource>$(PtlasShaderSource)</PreviewShaderSource>
+		<PreviewShaderOutput>Ptlas</PreviewShaderOutput>
+	</PropertyGroup>
+	<ItemGroup>
+		<ClCompile Include="Main.cpp" />
+		<ClCompile Include="PtlasExperiment.cpp" />
+		<ClInclude Include="PtlasExperiment.h" />
+		<None Include="README.md" />
+	</ItemGroup>
+	<Import Project="..\ClasSandbox\PreviewSandbox.targets" />
+	<Import Project="..\..\build_support\Cpp.targets" />
+</Project>

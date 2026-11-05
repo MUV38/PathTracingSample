@@ -7,6 +7,8 @@
   </Folder>
   <Folder Name="/Samples/">
 	<Project Path="samples/ClasSandbox/ClasSandbox.vcxproj" Id="d74aa697-c6ef-4c79-91e2-b18287ca0d52" />
+	<Project Path="samples/ClusterTemplatesSandbox/ClusterTemplatesSandbox.vcxproj" Id="696ba435-78f4-43e6-9127-e225812f056c" />
+	<Project Path="samples/PtlasSandbox/PtlasSandbox.vcxproj" Id="bf94bec1-b977-4437-9557-0fc3942c4bc1" />
     <Project Path="PathTracingSample.vcxproj" Id="65ea1ca1-5843-35c0-9fbc-420bc2c3c72e" />
     <Project Path="samples/DxrCube/DxrCube.vcxproj" Id="1cadce68-c963-4f5f-a5f8-6ecb2a9b9439" />
     <Project Path="samples/UsdKitchen/UsdKitchen.vcxproj" DefaultStartup="true" Id="f4680a75-5d93-4afb-a63a-79dc02ccb6c8" />

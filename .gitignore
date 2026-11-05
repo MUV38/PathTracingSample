@@ -5,5 +5,7 @@
 /build_support/Usd.local.props
 /build_support/Streamline.local.props
 /build_support/Clas.local.props
+/build_support/ClusterTemplates.local.props
+/build_support/Ptlas.local.props
 /assets/local/
 /assets/Source/Kitchen_set/
