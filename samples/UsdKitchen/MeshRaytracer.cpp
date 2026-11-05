@@ -649,7 +649,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	}
 	if (tracing.mMaxBounces > 8 || tracing.mSamplesPerFrame == 0 || tracing.mSamplesPerFrame > 16
 		|| !std::isfinite(tracing.mEnvironmentIntensity) || tracing.mEnvironmentIntensity < 0 || tracing.mEnvironmentIntensity > 100
-		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 13 || tracing.mGiMode > 7)
+		|| !std::isfinite(tracing.mEnvironmentRotation) || tracing.mRestirMode > 3 || tracing.mRestirDebug > 4 || tracing.mGiView > 13 || tracing.mGiMode > 8)
 	{
 		throw std::runtime_error("Invalid path tracing settings.");
 	}
@@ -698,7 +698,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	const uint32_t minimumGiMode = tracing.mGiView == 8 ? 2u : tracing.mGiView > 0 ? 1u : 0u;
 	constants.mGiEnabled = meshletColors || replay ? 0u
 		: tracing.mGiView == 13 ? 6u : tracing.mGiView >= 11 ? 5u
-		: tracing.mGiView == 10 ? (tracing.mGiMode == 7 ? 7u : 3u) : (std::max)(tracing.mGiMode, minimumGiMode);
+		: tracing.mGiView == 10 ? (tracing.mGiMode >= 7 ? tracing.mGiMode : 3u) : (std::max)(tracing.mGiMode, minimumGiMode);
 	constants.mHybridUnoptimized = constants.mGiEnabled == 5 && tracing.mHybridUnoptimized ? 1u : 0u;
 	constants.mPtReservoirConfidence = std::clamp(tracing.mPtReservoirConfidence, 2u, 8u);
 	constants.mSeed = tracing.mSeed;
@@ -706,7 +706,7 @@ void MeshRaytracer::render(Renderer& renderer, const Camera& camera, float viewp
 	constants.mGiView = meshletColors || replay ? 0u : tracing.mGiView;
 	constants.mGiUseHistory = tracing.mGiHistory ? 1u : 0u;
 	const bool useRR = !replay && mUseRayReconstruction && tracing.mRestirDebug == 0 && constants.mGiView == 0 && !meshletColors;
-	const bool spatialGi = (constants.mGiEnabled == 3 || constants.mGiEnabled == 7) && tracing.mGiSpatial && tracing.mMaxBounces > 0
+	const bool spatialGi = (constants.mGiEnabled == 3 || constants.mGiEnabled >= 7) && tracing.mGiSpatial && tracing.mMaxBounces > 0
 		&& constants.mRestirDebug == 0 && (constants.mGiView < 3 || constants.mGiView >= 8) && (!useRR || mRRView <= 1);
 	constants.mGiUseSpatial = spatialGi ? 1u : 0u;
 	const bool reconstructRR = useRR && mRRView == 0;

@@ -130,7 +130,7 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 			Surface surface = giSourceSurface(current);
 			float3 direction = normalize(history.position - surface.position);
 			float3 factor = giDiffuseBrdfCosine(surface, current.sourceView, direction);
-			if (giEnabled == 4)
+			if (giEnabled == 4 || giEnabled == 8)
 			{
 				factor = giFullPrimaryFactor(surface, current.sourceView, direction);
 			}
