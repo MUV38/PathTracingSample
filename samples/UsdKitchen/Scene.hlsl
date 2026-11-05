@@ -369,6 +369,8 @@ void RGS_Main()
 	uint2 pixel = DispatchRaysIndex().xy;
 	uint state = (pixel.x + pixel.y * DispatchRaysDimensions().x) ^ (sampleSeed * 0x9e3779b9u);
 	bool fixedGiGuide = giView >= 4 && giView <= 6;
+	const bool hybridGi = giEnabled == 5 || giEnabled == 6;
+	const bool fullPrimaryGi = giEnabled == 4 || giEnabled == 7;
 	state ^= ((fixedGiGuide ? 0u : (giEnabled >= 2 ? restirFrame : (rrEnabled != 0 ? rrFrame : frameIndex))) + 1u) * 277803737u;
 	if (restirPass == 3)
 	{
@@ -482,7 +484,7 @@ void RGS_Main()
 		float3 diffuseRatio = 0;
 		float3 connectionPosition = 0;
 		bool hybridPrefix = false;
-		uint connectionDepth = giEnabled >= 5 ? 2u : 1u;
+		uint connectionDepth = hybridGi ? 2u : 1u;
 		for (uint depth = 0; depth <= maxBounces; ++depth)
 		{
 			Payload payload;
@@ -573,8 +575,8 @@ void RGS_Main()
 				candidate.sourceView = view;
 				bool diffuseSource = surface.metallic < 1
 					&& maxComponent(surface.baseColor * (1 - fresnelSchlick(materialF0(surface), dot(surface.normal, view)))) > 0;
-				bool supportedSource = giEnabled >= 5 ? surface.roughness < 0.2f && maxBounces >= 2
-					: surface.roughness >= 0.2f && (giEnabled == 4 || diffuseSource);
+				bool supportedSource = hybridGi ? surface.roughness < 0.2f && maxBounces >= 2
+					: surface.roughness >= 0.2f && (fullPrimaryGi || diffuseSource);
 				candidate.sourceValid = supportedSource && surface.occlusion > 0 ? 1u : 0u;
 			}
 			if (giEnabled != 0 && depth == connectionDepth && candidate.solidAnglePdf > 0)
@@ -672,7 +674,7 @@ void RGS_Main()
 			}
 			float3 nextDirection, weight;
 			float3 u = float3(random(state), random(state), random(state));
-			if (giEnabled >= 5 && depth == 0 && candidate.sourceValid != 0)
+			if (hybridGi && depth == 0 && candidate.sourceValid != 0)
 			{
 				candidate.prefixSample = u;
 				hybridPrefix = u.z < specularProbability(surface, view);
@@ -710,12 +712,12 @@ void RGS_Main()
 			}
 			missWeight = 1.0f;
 			bool delta = surface.roughness < 0.001f && u.z < specularProbability(surface, view);
-			if (giEnabled != 0 && giEnabled < 5 && depth == 0 && !delta)
+			if (giEnabled != 0 && !hybridGi && depth == 0 && !delta)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
 				float3 factor = giDiffuseBrdfCosine(surface, view, nextDirection);
-				if (giEnabled == 4)
+				if (fullPrimaryGi)
 				{
 					// The full-lobe mode reconnects finite primary BSDFs, including rough metals.
 					factor = candidate.sourceValid != 0 ? weight * pdf : 0;
@@ -728,10 +730,10 @@ void RGS_Main()
 					candidate.inversePdf = rcp(pdf);
 					candidate.diffuseBrdfCosine = factor;
 					connectionPosition = surface.position;
-					diffuseRatio = giEnabled == 4 ? 1 : select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
+					diffuseRatio = fullPrimaryGi ? 1 : select(weight > 0, factor / pdf / max(weight, 1e-30f), 0);
 				}
 			}
-			if (giEnabled >= 5 && depth == 1 && hybridPrefix && surface.roughness >= 0.2f)
+			if (hybridGi && depth == 1 && hybridPrefix && surface.roughness >= 0.2f)
 			{
 				float pdf;
 				evaluateBsdf(surface, view, nextDirection, pdf);
@@ -815,7 +817,7 @@ void RGS_Main()
 				sampleHistoryColor = float3(stored.confidence / 8, stored.historyAge / 32.0f, sampleHistoryColor.b);
 			}
 		}
-		else if (giEnabled >= 2)
+		else if (giEnabled >= 2 && giEnabled != 7)
 		{
 			diffuseGi = temporalGi(candidate, pixel, sampleIndex, sampleHistoryColor, hybridWork);
 		}

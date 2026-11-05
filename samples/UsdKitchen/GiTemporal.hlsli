@@ -62,6 +62,12 @@ float giConnectionPdf(GiCandidate source, GiCandidate lightSample)
 
 #include "PtHybrid.hlsli"
 
+float3 giFullPrimaryFactor(Surface surface, float3 view, float3 direction)
+{
+	float pdf;
+	return evaluateBsdf(surface, view, direction, pdf) * saturate(dot(surface.normal, direction)) * surface.occlusion;
+}
+
 float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3 diagnostic, inout uint3 work)
 {
 	float3 fresh = current.reusable != 0 ? shadeGiCandidate(current) : 0;
@@ -126,9 +132,7 @@ float3 temporalGi(GiCandidate current, uint2 pixel, uint sampleIndex, out float3
 			float3 factor = giDiffuseBrdfCosine(surface, current.sourceView, direction);
 			if (giEnabled == 4)
 			{
-				float pdf;
-				factor = evaluateBsdf(surface, current.sourceView, direction, pdf)
-					* saturate(dot(surface.normal, direction)) * surface.occlusion;
+				factor = giFullPrimaryFactor(surface, current.sourceView, direction);
 			}
 			float3 integrand = factor * history.radiance * giConnectionJacobian(history, surface.position);
 			historyEstimate = giBalanceEstimate(integrand, currentPdf, history.areaPdf * historyRatio) * historyRatio;
